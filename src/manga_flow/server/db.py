@@ -770,6 +770,32 @@ def admin_stats() -> dict[str, Any]:
             LIMIT 10
             """
         ).fetchall()
+        expensive_jobs = conn.execute(
+            """
+            SELECT
+                usage_events.job_id,
+                usage_events.action_type,
+                usage_events.provider,
+                usage_events.model_name,
+                usage_events.status,
+                usage_events.estimated_units,
+                usage_events.actual_units,
+                usage_events.created_at,
+                users.username,
+                jobs.job_type,
+                jobs.status AS job_status
+            FROM usage_events
+            JOIN users ON users.id = usage_events.user_id
+            LEFT JOIN jobs ON jobs.id = usage_events.job_id
+            ORDER BY
+                CASE
+                    WHEN usage_events.actual_units > 0 THEN usage_events.actual_units
+                    ELSE usage_events.estimated_units
+                END DESC,
+                usage_events.id DESC
+            LIMIT 10
+            """
+        ).fetchall()
         recent_failed_jobs = conn.execute(
             """
             SELECT jobs.id, jobs.job_type, jobs.status, jobs.error_message, jobs.created_at, users.username
@@ -797,6 +823,7 @@ def admin_stats() -> dict[str, Any]:
             "by_model": [dict(row) for row in usage_by_model],
             "today": dict(today_usage or {}),
             "top_users": [dict(row) for row in top_users],
+            "expensive_jobs": [dict(row) for row in expensive_jobs],
         },
         "recent_failed_jobs": [dict(row) for row in recent_failed_jobs],
     }

@@ -947,6 +947,18 @@ def admin_page(user: dict[str, Any]) -> str:
             f"<td>{html.escape(str(item.get('model_name') or ''))}</td>"
             f"<td>{item.get('events') or 0}</td><td>{item.get('estimated_units') or 0}</td><td>{item.get('actual_units') or 0}</td></tr>"
         )
+    expensive_job_rows = []
+    for item in stats.get("usage", {}).get("expensive_jobs", [])[:8]:
+        job_id = html.escape(str(item.get("job_id") or ""))
+        expensive_job_rows.append(
+            f"<tr><td>{job_id}</td>"
+            f"<td>{html.escape(str(item.get('username') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('action_type') or item.get('job_type') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('provider') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('model_name') or ''))}</td>"
+            f"<td>{item.get('estimated_units') or 0}</td><td>{item.get('actual_units') or 0}</td>"
+            f"<td>{html.escape(str(item.get('status') or ''))}</td></tr>"
+        )
     job_rows = []
     for item in db.list_jobs(limit=30):
         job_id = html.escape(str(item.get("id") or ""))
@@ -1036,6 +1048,13 @@ def admin_page(user: dict[str, Any]) -> str:
     <table>
       <thead><tr><th>Provider</th><th>模型</th><th>事件数</th><th>预估点数</th><th>实际点数</th></tr></thead>
       <tbody>{''.join(model_usage_rows) or '<tr><td colspan="5">暂无模型用量</td></tr>'}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>高消耗任务</h2>
+    <table>
+      <thead><tr><th>Job ID</th><th>用户</th><th>动作</th><th>Provider</th><th>模型</th><th>预估点数</th><th>实际点数</th><th>状态</th></tr></thead>
+      <tbody>{''.join(expensive_job_rows) or '<tr><td colspan="8">暂无高消耗任务</td></tr>'}</tbody>
     </table>
   </section>
   <section>

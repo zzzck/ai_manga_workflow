@@ -264,6 +264,30 @@ def test_admin_can_cancel_other_users_db_job(tmp_path: Path, monkeypatch) -> Non
         assert forbidden.status_code == 403
 
 
+def test_admin_stats_include_expensive_jobs(tmp_path: Path, monkeypatch) -> None:
+    app_mod, db = load_server(tmp_path, monkeypatch)
+
+    with TestClient(app_mod.app) as client:
+        login_admin(client)
+        db.record_job("cheap_job", 1, "stage", payload_json="{}", reserved_units=5)
+        cheap_event = db.reserve_quota(1, 5, "stage", job_id="cheap_job", provider="p", model_name="small")
+        db.finish_usage_event(cheap_event, "success", actual_units=5)
+        db.record_job("expensive_job", 1, "stage", payload_json="{}", reserved_units=120)
+        expensive_event = db.reserve_quota(1, 120, "stage", job_id="expensive_job", provider="p", model_name="large")
+        db.finish_usage_event(expensive_event, "success", actual_units=120)
+
+        stats = client.get("/api/admin/stats")
+        assert stats.status_code == 200, stats.text
+        expensive_jobs = stats.json()["usage"]["expensive_jobs"]
+        assert expensive_jobs[0]["job_id"] == "expensive_job"
+        assert expensive_jobs[0]["actual_units"] == 120
+
+        admin_page = client.get("/admin")
+        assert admin_page.status_code == 200
+        assert "高消耗任务" in admin_page.text
+        assert "expensive_job" in admin_page.text
+
+
 def auth_mod_cookie_name() -> str:
     return sys.modules["manga_flow.server.auth"].COOKIE_NAME
 
