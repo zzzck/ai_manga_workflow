@@ -70,6 +70,41 @@ def test_project_resource_api_uses_user_workspace(tmp_path: Path, monkeypatch) -
         assert updated.json()["data"]["logline"] == "更新后的故事。"
 
 
+def test_file_api_alias_enforces_user_file_isolation(tmp_path: Path, monkeypatch) -> None:
+    app_mod, db = load_server(tmp_path, monkeypatch)
+    auth_mod = sys.modules["manga_flow.server.auth"]
+    global_project = tmp_path / "data" / "projects" / "global.yaml"
+    global_project.parent.mkdir(parents=True, exist_ok=True)
+    global_project.write_text("title: global\n", encoding="utf-8")
+
+    with TestClient(app_mod.app) as client:
+        login_admin(client)
+        created_user = db.create_user(
+            "file_user",
+            auth_mod.hash_password("file-pass"),
+            role="user",
+            monthly_quota=300,
+        )
+        assert client.get("/api/files/data/projects/global.yaml").status_code == 200
+
+        client.post("/logout", follow_redirects=False)
+        login_user(client, "file_user", "file-pass")
+        created_project = client.post("/api/projects", json={"name": "文件隔离测试"})
+        assert created_project.status_code == 200, created_project.text
+        project_path = created_project.json()["path"]
+        assert project_path.startswith(f"data/users/{created_user['id']}/projects/")
+
+        own_file = client.get(f"/api/files/{project_path}")
+        assert own_file.status_code == 200, own_file.text
+        assert "文件隔离测试" in own_file.text
+
+        legacy_own_file = client.get("/api/file", params={"path": project_path})
+        assert legacy_own_file.status_code == 200, legacy_own_file.text
+
+        forbidden = client.get("/api/files/data/projects/global.yaml")
+        assert forbidden.status_code == 403
+
+
 def test_workshop_db_result_recovers_from_project_yaml(tmp_path: Path, monkeypatch) -> None:
     app_mod, db = load_server(tmp_path, monkeypatch)
 

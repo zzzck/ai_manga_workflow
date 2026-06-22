@@ -170,6 +170,7 @@ GET  /api/projects
 POST /api/projects
 GET  /api/projects/{path}
 PUT  /api/projects/{path}
+GET  /api/files/{path}
 GET  /api/admin/users
 POST /api/admin/users
 PATCH /api/admin/users/{user_id}

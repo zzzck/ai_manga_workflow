@@ -90,7 +90,7 @@ data/server/ai_manga.sqlite3-shm
 - 管理运行信息：后台 `/admin` 会显示数据库路径、项目/输出目录、模型配置摘要、健康检查入口和备份命令；`GET /api/admin/server-info` 返回同样的 JSON 摘要，不包含密钥原文。
 - 部署自检命令：`manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env` 会检查 `.env`、默认密码风险、SQLite 路径、数据目录可写性和模型环境变量，不会调用外部模型接口。
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
-- 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file` 等均要求登录。
+- 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file`、`/api/files/{path}` 等均要求登录。
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
 - 长任务并发限制：普通生成任务和 AI 剧本工坊会在后端限制排队/运行中的任务数，默认单用户 2 个、全站 8 个；可用 `AI_MANGA_MAX_ACTIVE_JOBS_PER_USER` 和 `AI_MANGA_MAX_ACTIVE_JOBS_TOTAL` 调整，设为 `0` 表示不限制。
 - 普通生成任务结算：`/api/jobs` 创建任务时进入 `reserved_quota`，命令真正成功后转入 `used_quota`，命令失败后退回额度并记录失败日志。
@@ -100,7 +100,7 @@ data/server/ai_manga.sqlite3-shm
 - 普通用户项目索引：新旧项目接口都会把项目写入数据库索引；项目列表读取时如果遇到单个 YAML 损坏，会在对应项目上返回 `valid=false` 和错误信息，而不是影响整个列表。
 - 普通用户输出隔离：生成任务使用用户专属运行时配置，输出到 `outputs/users/<user_id>/`。
 - 普通用户任务隔离：只能在任务列表和任务详情中看到自己的任务；管理员可以查看全部任务。
-- 普通用户文件隔离：`/api/file` 只允许访问自己的项目目录和输出目录；管理员可以访问项目根目录内文件。
+- 普通用户文件隔离：`/api/files/{path}` 和旧版兼容接口 `/api/file?path=...` 只允许访问自己的项目目录和输出目录；管理员可以访问项目根目录内文件。
 
 ## 当前本地数据库
 
@@ -268,7 +268,7 @@ deploy/nginx/ai_manga_workflow.conf
 - 管理员可以修改普通用户额度、清零用量、禁用/启用账号、重置密码。
 - 普通用户登录后只能看到自己的项目列表。
 - 普通用户项目会初始化到 `data/users/<user_id>/projects/`。
-- 普通用户无法通过 `/api/file` 下载全局 `data/projects/` 文件。
+- 普通用户无法通过 `/api/files/{path}` 或 `/api/file` 下载全局 `data/projects/` 文件。
 - 普通用户可以下载自己的 `data/users/<user_id>/projects/` 文件。
 - 普通用户运行 `structure` 阶段时，输出目录为 `outputs/users/<user_id>/...`。
 - 普通用户运行 `structure` 阶段会先预扣对应额度，成功后转为已用。

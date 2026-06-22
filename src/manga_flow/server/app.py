@@ -1679,6 +1679,15 @@ def api_job_detail(job_id: str, user: dict[str, Any] = Depends(auth.current_user
 
 @app.get("/api/file")
 def api_file(path: str, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    return file_response_for_user(path, user)
+
+
+@app.get("/api/files/{file_path:path}")
+def api_files(file_path: str, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    return file_response_for_user(file_path, user)
+
+
+def file_response_for_user(path: str, user: dict[str, Any]) -> Response:
     try:
         file_path = legacy_web._safe_path(path)
     except ValueError as exc:
