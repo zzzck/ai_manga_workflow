@@ -67,11 +67,12 @@ data/server/ai_manga.sqlite3-shm
 - 登录页：账号密码登录，登录成功后写入 HttpOnly Cookie。
 - 退出登录：清除会话 Cookie。
 - 默认超级管理员自动初始化。
-- 后台管理页 `/admin`：管理员可创建用户、修改额度、禁用/启用账号、重置密码、清零已用额度，并查看用户额度。
+- 后台管理页 `/admin`：管理员可创建用户、修改额度、禁用/启用账号、重置密码、清零已用额度，并查看用户额度、统计概览和最近任务。
 - SQLite 数据库：本地存储用户、额度、用量流水、任务记录和项目索引。
 - 额度接口：`GET /api/quota/me`。
 - 用量接口：`GET /api/usage/me`、`GET /api/admin/usage`。
-- 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs/{job_id}`，由数据库记录任务归属、状态、日志路径和额度结算结果。
+- 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs`、`GET /api/jobs/{job_id}`、`POST /api/jobs/{job_id}/cancel`，由数据库记录任务归属、状态、日志路径和额度结算结果。
+- 管理任务和统计接口：`GET /api/admin/jobs` 支持按用户、状态和任务类型筛选，`GET /api/admin/stats` 返回用户、额度、任务状态、失败率和用量摘要。
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
 - 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file` 等均要求登录。
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
@@ -114,6 +115,8 @@ AI_MANGA_DB_PATH=/opt/ai_manga_workflow/data/server/ai_manga.sqlite3
 | 一键完整出片 | 220 |
 
 当前普通生成任务 `/api/jobs` 已按“创建时预扣、命令成功后转已用、命令失败后退回”的方式结算。AI 剧本工坊和规范化导入仍复用旧本地控制台逻辑，其中规范化导入是同步接口，AI 剧本工坊仍需要继续迁移到数据库任务执行器，才能做到生成中断、服务重启后的完整状态恢复和失败自动退款。
+
+普通生成任务取消支持当前服务进程内正在运行的任务：`POST /api/jobs/{job_id}/cancel` 会向正在运行的子进程发送终止信号，并在执行线程退出后把预扣额度退回。服务重启后已经失去进程句柄的历史任务只能查看状态和日志；如果需要跨进程、跨机器可靠取消，应继续引入 Redis/Celery/RQ 等任务队列。
 
 ## 与旧本地控制台的关系
 
@@ -169,7 +172,7 @@ WantedBy=multi-user.target
 
 - 用数据库任务表完全替代旧版 `web.py` 的 `WORKSHOP_JOBS`，让 AI 剧本工坊也支持重启后状态恢复。
 - AI 剧本工坊失败时按实际执行情况自动退款。
-- 管理后台支持查看失败率、模型统计、按用户筛选任务和删除失败任务。
+- 管理后台支持按用户筛选任务和查看失败率；后续还需要补模型维度统计和删除失败任务。
 - PostgreSQL 迁移和 Alembic 迁移脚本。
 
 ## 本地验证清单
@@ -189,3 +192,5 @@ WantedBy=multi-user.target
 - 普通用户运行 `structure` 阶段会先预扣对应额度，成功后转为已用。
 - 普通用户运行失败的普通生成任务会自动退回预扣额度，并在 `/api/jobs/{job_id}` 返回失败日志。
 - 服务重启后，普通生成任务的历史状态、日志路径和额度流水仍可从数据库查询。
+- 普通用户可以通过 `POST /api/jobs/{job_id}/cancel` 终止当前进程内正在运行的普通生成任务。
+- 管理员可以通过 `/admin` 查看统计概览、最近任务、最近用量，也可以通过 `/api/admin/stats` 查看统计 JSON。

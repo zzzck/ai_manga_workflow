@@ -347,17 +347,18 @@ def record_job(
         )
 
 
-def mark_job_running(job_id: str) -> None:
+def mark_job_running(job_id: str) -> bool:
     with connect() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE jobs
             SET status = 'running',
                 started_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE id = ? AND status = 'queued'
             """,
             (job_id,),
         )
+        return cursor.rowcount > 0
 
 
 def finish_job(
@@ -426,31 +427,38 @@ def list_usage(user_id: int | None = None, limit: int = 50) -> list[dict[str, An
         return [dict(row) for row in rows]
 
 
-def list_jobs(user_id: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
+def list_jobs(
+    user_id: int | None = None,
+    limit: int = 50,
+    *,
+    status: str = "",
+    job_type: str = "",
+) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), 200))
+    filters: list[str] = []
+    values: list[Any] = []
+    if user_id is not None:
+        filters.append("jobs.user_id = ?")
+        values.append(user_id)
+    if status:
+        filters.append("jobs.status = ?")
+        values.append(status)
+    if job_type:
+        filters.append("jobs.job_type = ?")
+        values.append(job_type)
+    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
     with connect() as conn:
-        if user_id is None:
-            rows = conn.execute(
-                """
-                SELECT jobs.*, users.username
-                FROM jobs
-                JOIN users ON users.id = jobs.user_id
-                ORDER BY jobs.created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT jobs.*, users.username
-                FROM jobs
-                JOIN users ON users.id = jobs.user_id
-                WHERE jobs.user_id = ?
-                ORDER BY jobs.created_at DESC
-                LIMIT ?
-                """,
-                (user_id, limit),
-            ).fetchall()
+        rows = conn.execute(
+            f"""
+            SELECT jobs.*, users.username
+            FROM jobs
+            JOIN users ON users.id = jobs.user_id
+            {where_sql}
+            ORDER BY jobs.created_at DESC
+            LIMIT ?
+            """,
+            (*values, limit),
+        ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -513,6 +521,99 @@ def list_projects(user_id: int | None = None) -> list[dict[str, Any]]:
                 (user_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def admin_stats() -> dict[str, Any]:
+    with connect() as conn:
+        user_counts = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total_users,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_users,
+                SUM(CASE WHEN role IN ('admin', 'super_admin') THEN 1 ELSE 0 END) AS admin_users
+            FROM users
+            """
+        ).fetchone()
+        quota_totals = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(monthly_quota), 0) AS monthly_quota,
+                COALESCE(SUM(used_quota), 0) AS used_quota,
+                COALESCE(SUM(reserved_quota), 0) AS reserved_quota
+            FROM user_quotas
+            """
+        ).fetchone()
+        job_counts = conn.execute(
+            """
+            SELECT status, COUNT(*) AS count
+            FROM jobs
+            GROUP BY status
+            ORDER BY status
+            """
+        ).fetchall()
+        job_type_counts = conn.execute(
+            """
+            SELECT job_type, COUNT(*) AS count
+            FROM jobs
+            GROUP BY job_type
+            ORDER BY count DESC, job_type
+            """
+        ).fetchall()
+        usage_by_status = conn.execute(
+            """
+            SELECT status, COUNT(*) AS count, COALESCE(SUM(actual_units), 0) AS actual_units
+            FROM usage_events
+            GROUP BY status
+            ORDER BY status
+            """
+        ).fetchall()
+        today_usage = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS events,
+                COALESCE(SUM(actual_units), 0) AS actual_units
+            FROM usage_events
+            WHERE date(created_at, 'localtime') = date('now', 'localtime')
+            """
+        ).fetchone()
+        top_users = conn.execute(
+            """
+            SELECT users.id, users.username, user_quotas.used_quota, user_quotas.reserved_quota
+            FROM user_quotas
+            JOIN users ON users.id = user_quotas.user_id
+            ORDER BY user_quotas.used_quota DESC, user_quotas.reserved_quota DESC
+            LIMIT 10
+            """
+        ).fetchall()
+        recent_failed_jobs = conn.execute(
+            """
+            SELECT jobs.id, jobs.job_type, jobs.status, jobs.error_message, jobs.created_at, users.username
+            FROM jobs
+            JOIN users ON users.id = jobs.user_id
+            WHERE jobs.status IN ('failed', 'canceled')
+            ORDER BY jobs.created_at DESC
+            LIMIT 10
+            """
+        ).fetchall()
+    total_jobs = sum(int(row["count"]) for row in job_counts)
+    failed_jobs = sum(int(row["count"]) for row in job_counts if row["status"] in {"failed", "canceled"})
+    return {
+        "users": dict(user_counts or {}),
+        "quotas": dict(quota_totals or {}),
+        "jobs": {
+            "total": total_jobs,
+            "failed_or_canceled": failed_jobs,
+            "failure_rate": (failed_jobs / total_jobs) if total_jobs else 0,
+            "by_status": [dict(row) for row in job_counts],
+            "by_type": [dict(row) for row in job_type_counts],
+        },
+        "usage": {
+            "by_status": [dict(row) for row in usage_by_status],
+            "today": dict(today_usage or {}),
+            "top_users": [dict(row) for row in top_users],
+        },
+        "recent_failed_jobs": [dict(row) for row in recent_failed_jobs],
+    }
 
 
 def next_job_hint() -> str:

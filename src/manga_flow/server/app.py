@@ -25,6 +25,8 @@ ROOT = Path.cwd().resolve()
 GLOBAL_PROJECT_DIR = ROOT / "data" / "projects"
 USER_DATA_DIR = ROOT / "data" / "users"
 USER_OUTPUT_DIR = ROOT / "outputs" / "users"
+RUNNING_PROCESSES: dict[str, subprocess.Popen[str]] = {}
+RUNNING_PROCESSES_LOCK = threading.Lock()
 
 
 @app.on_event("startup")
@@ -68,7 +70,7 @@ def public_job_status(status_value: str) -> str:
     return {
         "success": "done",
         "failed": "failed",
-        "canceled": "failed",
+        "canceled": "canceled",
         "running": "running",
         "queued": "queued",
     }.get(status_value, status_value)
@@ -111,6 +113,25 @@ def db_jobs_for_user(user: dict[str, Any]) -> list[dict[str, Any]]:
     return [db_job_payload(row) for row in rows]
 
 
+def cancel_db_job(job_id: str) -> dict[str, Any]:
+    job = db.get_job(job_id)
+    if not job:
+        raise ValueError("任务不存在。")
+    if str(job.get("job_type") or "") == "script_workshop":
+        raise ValueError("AI 剧本工坊任务请使用 /api/script/workshop/jobs/{job_id}/cancel 终止。")
+    status_value = str(job.get("status") or "")
+    if status_value in {"success", "failed", "canceled"}:
+        return db_job_payload(job, include_log=True)
+    db.update_job_status(job_id, "canceled", error_message="用户请求终止任务。")
+    with RUNNING_PROCESSES_LOCK:
+        process = RUNNING_PROCESSES.get(job_id)
+    if process and process.poll() is None:
+        process.terminate()
+    updated = db.get_job(job_id)
+    assert updated is not None
+    return db_job_payload(updated, include_log=True)
+
+
 def start_db_job(user: dict[str, Any], payload: dict[str, Any], units: int) -> dict[str, Any]:
     job_id = db.next_job_hint()
     prepared = prepare_user_stage_payload(user, payload, job_id_hint=job_id)
@@ -142,7 +163,12 @@ def start_db_job(user: dict[str, Any], payload: dict[str, Any], units: int) -> d
 
 
 def run_db_job(job_id: str, command: list[str], log_path: Path, event_id: int, units: int) -> None:
-    db.mark_job_running(job_id)
+    if not db.mark_job_running(job_id):
+        latest = db.get_job(job_id) or {}
+        if latest.get("status") == "canceled":
+            db.finish_usage_event(event_id, "refunded")
+            db.finish_job(job_id, "canceled", actual_units=0, error_message=latest.get("error_message") or "用户请求终止任务。")
+        return
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,6 +187,10 @@ def run_db_job(job_id: str, command: list[str], log_path: Path, event_id: int, u
                 text=True,
                 bufsize=1,
             )
+            with RUNNING_PROCESSES_LOCK:
+                RUNNING_PROCESSES[job_id] = process
+            if (db.get_job(job_id) or {}).get("status") == "canceled" and process.poll() is None:
+                process.terminate()
             assert process.stdout is not None
             for line in process.stdout:
                 log.write(line)
@@ -170,7 +200,14 @@ def run_db_job(job_id: str, command: list[str], log_path: Path, event_id: int, u
         error_message = repr(exc)
         with log_path.open("a", encoding="utf-8") as log:
             log.write(f"\nERROR: {error_message}\n")
-    if return_code == 0:
+    finally:
+        with RUNNING_PROCESSES_LOCK:
+            RUNNING_PROCESSES.pop(job_id, None)
+    latest = db.get_job(job_id) or {}
+    if latest.get("status") == "canceled":
+        db.finish_usage_event(event_id, "refunded")
+        db.finish_job(job_id, "canceled", actual_units=0, error_message=latest.get("error_message") or "用户请求终止任务。")
+    elif return_code == 0:
         db.finish_usage_event(event_id, "success", actual_units=units)
         db.finish_job(job_id, "success", actual_units=units)
     else:
@@ -418,6 +455,20 @@ def admin_page(user: dict[str, Any]) -> str:
             f"<input name='password' placeholder='新密码'><button>重置密码</button></form>"
             f"<form method='post' action='/admin/users/{item['id']}/quota/reset' class='inline-form'><button>清零用量</button></form></td></tr>"
         )
+    stats = db.admin_stats()
+    quota_stats = stats.get("quotas", {})
+    job_stats = stats.get("jobs", {})
+    user_stats = stats.get("users", {})
+    job_rows = []
+    for item in db.list_jobs(limit=30):
+        job_rows.append(
+            f"<tr><td>{html.escape(str(item.get('id') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('username') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('job_type') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('status') or ''))}</td>"
+            f"<td>{item.get('reserved_units') or 0}</td><td>{item.get('actual_units') or 0}</td>"
+            f"<td>{html.escape(str(item.get('created_at') or ''))}</td></tr>"
+        )
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -429,6 +480,10 @@ def admin_page(user: dict[str, Any]) -> str:
     header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }}
     section {{ background:#fff; border:1px solid #d8dde6; border-radius:8px; padding:16px; margin-bottom:16px; }}
     h1, h2 {{ margin:0 0 12px; }}
+    .stat-grid {{ display:grid; grid-template-columns:repeat(4, minmax(140px, 1fr)); gap:12px; }}
+    .stat-card {{ border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#f8fafc; }}
+    .stat-card strong {{ display:block; font-size:22px; margin-bottom:4px; }}
+    .stat-card span {{ color:#667085; font-size:12px; }}
     table {{ width:100%; border-collapse:collapse; font-size:13px; }}
     th, td {{ text-align:left; border-bottom:1px solid #e5e7eb; padding:8px; }}
     form {{ display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:10px; align-items:end; }}
@@ -447,6 +502,15 @@ def admin_page(user: dict[str, Any]) -> str:
     <div><a href="/console">返回工作台</a></div>
   </header>
   <section>
+    <h2>统计概览</h2>
+    <div class="stat-grid">
+      <div class="stat-card"><strong>{user_stats.get('total_users') or 0}</strong><span>用户总数</span></div>
+      <div class="stat-card"><strong>{quota_stats.get('used_quota') or 0}</strong><span>已用额度</span></div>
+      <div class="stat-card"><strong>{quota_stats.get('reserved_quota') or 0}</strong><span>预扣额度</span></div>
+      <div class="stat-card"><strong>{round(float(job_stats.get('failure_rate') or 0) * 100, 1)}%</strong><span>任务失败/终止率</span></div>
+    </div>
+  </section>
+  <section>
     <h2>创建用户</h2>
     <form method="post" action="/admin/users">
       <div><label>账号</label><input name="username" required></div>
@@ -462,6 +526,14 @@ def admin_page(user: dict[str, Any]) -> str:
       <thead><tr><th>ID</th><th>账号</th><th>角色</th><th>状态</th><th>总额</th><th>已用</th><th>预扣</th><th>可用</th><th>操作</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
+  </section>
+  <section>
+    <h2>最近任务</h2>
+    <table>
+      <thead><tr><th>ID</th><th>用户</th><th>类型</th><th>状态</th><th>预扣</th><th>实际</th><th>创建时间</th></tr></thead>
+      <tbody>{''.join(job_rows)}</tbody>
+    </table>
+    <p><a href="/api/admin/jobs" target="_blank">查看任务 JSON</a> · <a href="/api/admin/stats" target="_blank">查看统计 JSON</a></p>
   </section>
   <section>
     <h2>最近用量</h2>
@@ -606,9 +678,21 @@ def api_admin_usage(user: dict[str, Any] = Depends(auth.current_user)) -> list[d
 
 
 @app.get("/api/admin/jobs")
-def api_admin_jobs(user: dict[str, Any] = Depends(auth.current_user)) -> list[dict[str, Any]]:
+def api_admin_jobs(
+    user_id: int | None = None,
+    status: str = "",
+    job_type: str = "",
+    limit: int = 50,
+    user: dict[str, Any] = Depends(auth.current_user),
+) -> list[dict[str, Any]]:
     auth.require_admin(user)
-    return db.list_jobs()
+    return db.list_jobs(user_id=user_id, status=status, job_type=job_type, limit=limit)
+
+
+@app.get("/api/admin/stats")
+def api_admin_stats(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    auth.require_admin(user)
+    return db.admin_stats()
 
 
 @app.get("/api/state")
@@ -731,6 +815,20 @@ async def api_jobs_start(request: Request, user: dict[str, Any] = Depends(auth.c
     units = quota_units(action, stages)
     try:
         return start_db_job(user, payload, units)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs")
+def api_jobs_list(user: dict[str, Any] = Depends(auth.current_user)) -> list[dict[str, Any]]:
+    return db_jobs_for_user(user)
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def api_job_cancel(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    require_job_access(user, job_id)
+    try:
+        return cancel_db_job(job_id)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

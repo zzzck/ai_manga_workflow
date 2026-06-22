@@ -1944,10 +1944,12 @@ function renderJobs(jobs) {
     return;
   }
   box.innerHTML = jobs.map(job => {
-    const cls = job.status === 'running' ? 'running' : (job.status === 'done' ? 'done' : (job.status === 'failed' ? 'failed' : ''));
+    const cls = job.status === 'running' ? 'running' : (job.status === 'done' ? 'done' : (['failed', 'canceled'].includes(job.status) ? 'failed' : ''));
     const active = job.id === selectedJob ? ' active' : '';
+    const canCancel = ['queued', 'running'].includes(job.status) && job.action !== 'script_workshop';
     return `<div class="job${active}" onclick="selectJob('${job.id}')">
       <div class="row"><strong>${job.label}</strong><span class="badge ${cls}">${job.status}</span></div>
+      ${canCancel ? `<button class="small-btn danger" style="margin-top:8px;" onclick="cancelJob(event, '${job.id}')">终止任务</button>` : ''}
       <div class="muted" style="font-size:12px;margin-top:4px;">${job.id}</div>
     </div>`;
   }).join('');
@@ -1974,6 +1976,22 @@ async function refreshJob() {
   if (shouldStickToBottom) box.scrollTop = box.scrollHeight;
   lastLogJobId = selectedJob;
   lastLogText = nextLog;
+}
+
+async function cancelJob(event, id) {
+  if (event) event.stopPropagation();
+  selectedJob = id;
+  try {
+    await api(`/api/jobs/${id}/cancel`, {method: 'POST'});
+    jobsSignature = '';
+    lastLogJobId = null;
+    lastLogText = null;
+    await refreshState();
+    await refreshJob();
+  } catch (err) {
+    const box = document.getElementById('log');
+    box.textContent = `终止失败：${String(err.message || err)}`;
+  }
 }
 
 function link(path, label) {
