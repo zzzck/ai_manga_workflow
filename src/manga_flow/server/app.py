@@ -487,6 +487,38 @@ def is_admin(user: dict[str, Any]) -> bool:
     return user["role"] in {"super_admin", "admin"}
 
 
+def public_user_payload(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: user[key]
+        for key in ["id", "username", "role", "status", "display_name", "created_at", "last_login_at"]
+        if key in user
+    }
+
+
+def cookie_secure() -> bool:
+    return os.getenv("AI_MANGA_COOKIE_SECURE", "").lower() in {"1", "true", "yes", "on"}
+
+
+def set_session_cookie(response: Response, user_id: int) -> None:
+    response.set_cookie(
+        auth.COOKIE_NAME,
+        auth.create_token(user_id),
+        httponly=True,
+        samesite="lax",
+        secure=cookie_secure(),
+    )
+
+
+def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
+    user = db.get_user_by_username(username.strip())
+    if not user or user["status"] != "active" or not auth.verify_password(password, user["password_hash"]):
+        return None
+    with db.connect() as conn:
+        conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"],))
+    fresh = db.get_user_by_id(int(user["id"]))
+    return fresh or user
+
+
 def user_project_dir(user: dict[str, Any]) -> Path:
     return USER_DATA_DIR / str(user["id"]) / "projects"
 
@@ -1041,13 +1073,11 @@ async def login_post(request: Request) -> Response:
     form = await form_data(request)
     username = form.get("username", "").strip()
     password = form.get("password", "")
-    user = db.get_user_by_username(username)
-    if not user or user["status"] != "active" or not auth.verify_password(password, user["password_hash"]):
+    user = authenticate_user(username, password)
+    if not user:
         return HTMLResponse(login_page("账号或密码错误，或账号已禁用。"), status_code=401)
-    with db.connect() as conn:
-        conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"],))
     response = RedirectResponse("/console", status_code=302)
-    response.set_cookie(auth.COOKIE_NAME, auth.create_token(int(user["id"])), httponly=True, samesite="lax")
+    set_session_cookie(response, int(user["id"]))
     return response
 
 
@@ -1158,7 +1188,25 @@ def admin_delete_failed_job_form(job_id: str, user: dict[str, Any] = Depends(aut
 
 @app.get("/api/auth/me")
 def api_me(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    return {key: user[key] for key in ["id", "username", "role", "status", "display_name", "created_at", "last_login_at"]}
+    return public_user_payload(user)
+
+
+@app.post("/api/auth/login")
+async def api_login(request: Request) -> JSONResponse:
+    payload = await request.json()
+    user = authenticate_user(str(payload.get("username") or ""), str(payload.get("password") or ""))
+    if not user:
+        raise HTTPException(status_code=401, detail="账号或密码错误，或账号已禁用。")
+    response = JSONResponse({"status": "ok", "user": public_user_payload(user)})
+    set_session_cookie(response, int(user["id"]))
+    return response
+
+
+@app.post("/api/auth/logout")
+def api_logout() -> JSONResponse:
+    response = JSONResponse({"status": "ok"})
+    response.delete_cookie(auth.COOKIE_NAME)
+    return response
 
 
 @app.post("/api/auth/change-password")
@@ -1242,6 +1290,37 @@ def api_admin_users(user: dict[str, Any] = Depends(auth.current_user)) -> list[d
     return db.list_users()
 
 
+@app.post("/api/admin/users")
+async def api_admin_create_user(request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    auth.require_admin(user)
+    payload = await request.json()
+    username = str(payload.get("username") or "").strip()
+    password = str(payload.get("password") or "")
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空。")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="初始密码至少 6 位。")
+    try:
+        monthly_quota = int(payload.get("monthly_quota") if "monthly_quota" in payload else 500)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="月额度必须是整数。") from exc
+    if monthly_quota < 0:
+        raise HTTPException(status_code=400, detail="月额度不能小于 0。")
+    try:
+        created = db.create_user(
+            username=username,
+            password_hash=auth.hash_password(password),
+            role=validate_role_value(str(payload.get("role") or "user"), user),
+            display_name=str(payload.get("display_name") or ""),
+            monthly_quota=monthly_quota,
+        )
+        return public_user_payload(created)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.patch("/api/admin/users/{user_id}")
 async def api_admin_update_user(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     target = require_can_manage_user(user, user_id)
@@ -1263,8 +1342,37 @@ async def api_admin_update_user(user_id: int, request: Request, user: dict[str, 
     if "monthly_quota" in payload:
         updates["monthly_quota"] = int(payload["monthly_quota"])
     if not updates:
-        return target
-    return db.update_user(user_id, **updates)
+        return public_user_payload(target)
+    return public_user_payload(db.update_user(user_id, **updates))
+
+
+@app.post("/api/admin/users/{user_id}/reset-password")
+async def api_admin_reset_user_password(
+    user_id: int,
+    request: Request,
+    user: dict[str, Any] = Depends(auth.current_user),
+) -> dict[str, str]:
+    require_can_manage_user(user, user_id)
+    payload = await request.json()
+    password = str(payload.get("password") or "")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少 6 位。")
+    db.update_user(user_id, password_hash=auth.hash_password(password))
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/users/{user_id}/disable")
+def api_admin_disable_user(user_id: int, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    target = require_can_manage_user(user, user_id)
+    if int(target["id"]) == int(user["id"]):
+        raise HTTPException(status_code=400, detail="不能禁用当前登录账号。")
+    return public_user_payload(db.update_user(user_id, status="disabled"))
+
+
+@app.post("/api/admin/users/{user_id}/enable")
+def api_admin_enable_user(user_id: int, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    require_can_manage_user(user, user_id)
+    return public_user_payload(db.update_user(user_id, status="active"))
 
 
 @app.post("/api/admin/users/{user_id}/quota/add")

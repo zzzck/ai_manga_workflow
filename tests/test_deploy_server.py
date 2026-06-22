@@ -180,6 +180,69 @@ def test_admin_quota_api_lists_and_updates_user_quotas(tmp_path: Path, monkeypat
         assert forbidden.status_code == 403
 
 
+def test_json_auth_and_admin_user_lifecycle_api(tmp_path: Path, monkeypatch) -> None:
+    app_mod, _ = load_server(tmp_path, monkeypatch)
+
+    with TestClient(app_mod.app) as client:
+        assert client.get("/api/auth/me").status_code == 401
+
+        login = client.post("/api/auth/login", json={"username": "admin", "password": "adminpass123"})
+        assert login.status_code == 200, login.text
+        assert login.json()["user"]["username"] == "admin"
+        assert "password_hash" not in login.json()["user"]
+        assert auth_mod_cookie_name() in login.headers.get("set-cookie", "")
+
+        me = client.get("/api/auth/me")
+        assert me.status_code == 200, me.text
+        assert me.json()["username"] == "admin"
+
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "username": "api_user",
+                "password": "first-pass",
+                "display_name": "API 用户",
+                "monthly_quota": 77,
+            },
+        )
+        assert created.status_code == 200, created.text
+        created_body = created.json()
+        user_id = int(created_body["id"])
+        assert created_body["username"] == "api_user"
+        assert "password_hash" not in created_body
+
+        updated = client.patch(f"/api/admin/users/{user_id}", json={"display_name": "改名用户"})
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["display_name"] == "改名用户"
+        assert "password_hash" not in updated.json()
+
+        reset = client.post(f"/api/admin/users/{user_id}/reset-password", json={"password": "second-pass"})
+        assert reset.status_code == 200, reset.text
+
+        disabled = client.post(f"/api/admin/users/{user_id}/disable")
+        assert disabled.status_code == 200, disabled.text
+        assert disabled.json()["status"] == "disabled"
+
+        rejected_login = client.post("/api/auth/login", json={"username": "api_user", "password": "second-pass"})
+        assert rejected_login.status_code == 401
+
+        enabled = client.post(f"/api/admin/users/{user_id}/enable")
+        assert enabled.status_code == 200, enabled.text
+        assert enabled.json()["status"] == "active"
+
+        user_login = client.post("/api/auth/login", json={"username": "api_user", "password": "second-pass"})
+        assert user_login.status_code == 200, user_login.text
+        assert user_login.json()["user"]["username"] == "api_user"
+
+        logout = client.post("/api/auth/logout")
+        assert logout.status_code == 200
+        assert client.get("/api/auth/me").status_code == 401
+
+
+def auth_mod_cookie_name() -> str:
+    return sys.modules["manga_flow.server.auth"].COOKIE_NAME
+
+
 def test_backup_restore_requires_explicit_apply_and_force(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AI_MANGA_DB_PATH", str(tmp_path / "data" / "server" / "ai_manga.sqlite3"))
