@@ -99,7 +99,19 @@ INDEX_HTML = r"""<!doctype html>
     header { padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; justify-content: space-between; gap: 16px; align-items: center; }
     h1 { margin: 0; font-size: 20px; }
     .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
-    main { padding: 18px 24px 28px; display: grid; gap: 16px; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); align-items: start; }
+    main { padding: 18px 24px 28px; }
+    .page-tabs { display: flex; gap: 8px; padding: 12px 24px 0; background: var(--bg); flex-wrap: wrap; }
+    .page-tabs button { min-height: 34px; padding: 0 13px; }
+    .page-tabs button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .home-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 16px; align-items: stretch; }
+    .entry-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: grid; gap: 12px; align-content: start; }
+    .entry-card h2 { font-size: 18px; margin: 0; }
+    .entry-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .entry-card button { justify-self: start; min-width: 140px; }
+    .production-layout { display: grid; gap: 16px; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); align-items: start; }
+    .editor-layout { display: grid; gap: 16px; grid-template-columns: minmax(300px, 0.56fr) minmax(0, 1fr); align-items: start; }
     .sidebar, .workspace { display: grid; gap: 16px; align-content: start; }
     .runtime-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr); align-items: start; }
     section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
@@ -183,7 +195,7 @@ INDEX_HTML = r"""<!doctype html>
     video { width: 100%; max-height: 540px; border: 1px solid var(--line); border-radius: 6px; background: #000; }
     .muted { color: var(--muted); }
     @media (max-width: 1100px) { .workshop-grid, .workshop-request { grid-template-columns: 1fr; } }
-    @media (max-width: 960px) { main { grid-template-columns: 1fr; padding: 12px; } .runtime-grid, .beat-editor { grid-template-columns: 1fr; } header { padding: 14px 12px; } }
+    @media (max-width: 960px) { main { padding: 12px; } .home-grid, .production-layout, .editor-layout, .runtime-grid, .beat-editor { grid-template-columns: 1fr; } header { padding: 14px 12px; } .page-tabs { padding: 10px 12px 0; } }
   </style>
 </head>
 <body>
@@ -194,8 +206,41 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <button onclick="refreshState()">刷新</button>
   </header>
+  <nav class="page-tabs">
+    <button id="tab-home" class="active" onclick="showPage('home')">入口</button>
+    <button id="tab-workshop" onclick="showPage('workshop')">AI 生成剧本</button>
+    <button id="tab-editor" onclick="showPage('editor')">导入与编辑</button>
+    <button id="tab-production" onclick="showPage('production')">生成控制</button>
+  </nav>
   <main>
-    <div class="sidebar">
+    <div id="page-home" class="page active">
+      <div class="home-grid">
+        <div class="entry-card">
+          <h2>AI 生成剧本</h2>
+          <p>输入主题、类型和风格，由多角色工坊逐层生成剧本，并自动保存为可编辑项目。</p>
+          <button class="primary" onclick="showPage('workshop')">进入 AI 工坊</button>
+        </div>
+        <div class="entry-card">
+          <h2>导入已有剧本</h2>
+          <p>上传或粘贴现有剧本，规范化为角色、场景、分幕和镜头，再继续出片流程。</p>
+          <button class="primary" onclick="showPage('editor'); document.getElementById('importScript')?.focus();">导入剧本</button>
+        </div>
+        <div class="entry-card">
+          <h2>继续编辑</h2>
+          <p>加载项目 YAML，修改角色音色、分幕、对白、镜头动作和保存文件名。</p>
+          <button onclick="showPage('editor')">打开编辑器</button>
+        </div>
+        <div class="entry-card">
+          <h2>生成成片</h2>
+          <p>检查项目，分步生成脚本、图片、配音、视频，或一键完整出片。</p>
+          <button onclick="showPage('production')">进入生成控制</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-production" class="page">
+      <div class="production-layout">
+        <div class="sidebar">
       <section>
         <h2>配置</h2>
         <label>项目 YAML</label>
@@ -236,11 +281,27 @@ INDEX_HTML = r"""<!doctype html>
         <h2>任务</h2>
         <div id="jobs" class="muted">暂无任务</div>
       </section>
+        </div>
+
+        <div class="workspace">
+          <div class="runtime-grid">
+            <section>
+              <h2>任务日志</h2>
+              <pre id="log">等待任务开始...</pre>
+            </section>
+            <section>
+              <h2>最新产物</h2>
+              <div id="outputs" class="links"></div>
+              <div id="preview" style="margin-top: 12px;"></div>
+            </section>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="workspace">
+    <div id="page-workshop" class="page">
       <section>
-        <h2>剧本编辑</h2>
+        <h2>AI 生成剧本</h2>
         <div class="item-card workshop-shell">
           <div class="card-head">
             <strong>AI 剧本工坊</strong>
@@ -335,7 +396,14 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
         </div>
-        <div class="item-card">
+      </section>
+    </div>
+
+    <div id="page-editor" class="page">
+      <div class="editor-layout">
+        <section>
+          <h2>导入已有剧本</h2>
+          <div class="item-card">
           <div class="card-head"><strong>导入已有剧本</strong></div>
           <div class="form-grid">
             <div class="field-full">
@@ -358,7 +426,10 @@ INDEX_HTML = r"""<!doctype html>
           </div>
           <button class="primary" style="width:100%;margin-top:8px;" onclick="importScriptDraft()">规范化导入剧本</button>
           <div id="importStatus" class="hint">导入后会自动填入结构化表单，保存后即可继续生成图片、配音、视频和成片。</div>
-        </div>
+          </div>
+        </section>
+        <section>
+          <h2>剧本编辑</h2>
         <div class="grid2">
           <div>
             <label>剧本文件名</label>
@@ -386,16 +457,6 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <div id="editorStatus" class="hint">保存后会自动进入项目下拉框，可继续运行检查或一键完整出片。</div>
-      </section>
-      <div class="runtime-grid">
-        <section>
-          <h2>任务日志</h2>
-          <pre id="log">等待任务开始...</pre>
-        </section>
-        <section>
-          <h2>最新产物</h2>
-          <div id="outputs" class="links"></div>
-          <div id="preview" style="margin-top: 12px;"></div>
         </section>
       </div>
     </div>
@@ -412,6 +473,22 @@ let editorLoadedPath = '';
 let currentProject = null;
 let selectedBeatIndex = 0;
 let selectedShotSide = 'first';
+let currentPage = 'home';
+
+function showPage(page) {
+  const nextPage = document.getElementById(`page-${page}`) ? page : 'home';
+  currentPage = nextPage;
+  document.querySelectorAll('.page').forEach(el => {
+    el.classList.toggle('active', el.id === `page-${nextPage}`);
+  });
+  document.querySelectorAll('.page-tabs button').forEach(button => {
+    button.classList.toggle('active', button.id === `tab-${nextPage}`);
+  });
+  if (nextPage === 'production') {
+    refreshJob().catch(err => console.warn(err));
+  }
+}
+
 const TENCENT_VOICES = [
   {id: 101013, name: '智辉', gender: 'male', scene: '新闻男声', tier: '精品音色', sample_rate: '8k/16k'},
   {id: 101030, name: '智柯', gender: 'male', scene: '通用男声', tier: '精品音色', sample_rate: '8k/16k'},
@@ -890,6 +967,7 @@ async function startJob(action, stages) {
       }
     } catch (err) {
       setEditorStatus(`未启动流程：${String(err.message || err)}`, true);
+      showPage('editor');
       return;
     }
   }
@@ -900,6 +978,7 @@ async function startJob(action, stages) {
     body: JSON.stringify(payload)
   });
   selectedJob = job.id;
+  showPage('production');
   await refreshState();
   await refreshJob();
 }
@@ -1147,6 +1226,7 @@ function applyWorkshopResult(job) {
   } else {
     setOutlineStatus(`已生成并自动保存：${currentProject.title || currentProject.project_id}。保存路径：${savedPath}。日志：${result.log_dir || job.log_dir || ''}`);
   }
+  showPage('editor');
 }
 
 async function cancelWorkshopJob() {
