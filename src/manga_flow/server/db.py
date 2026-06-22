@@ -34,6 +34,61 @@ def current_quota_period() -> str:
     return datetime.now().strftime("%Y-%m")
 
 
+def table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    if column not in table_columns(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def migrate_existing_schema(conn: sqlite3.Connection) -> None:
+    migrations: dict[str, dict[str, str]] = {
+        "users": {
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+            "display_name": "TEXT NOT NULL DEFAULT ''",
+            "last_login_at": "TEXT",
+        },
+        "user_quotas": {
+            "reserved_quota": "INTEGER NOT NULL DEFAULT 0",
+            "reset_cycle": "TEXT NOT NULL DEFAULT 'monthly'",
+            "reset_at": "TEXT",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        },
+        "usage_events": {
+            "job_id": "TEXT",
+            "provider": "TEXT NOT NULL DEFAULT ''",
+            "model_name": "TEXT NOT NULL DEFAULT ''",
+            "actual_units": "INTEGER NOT NULL DEFAULT 0",
+            "raw_cost": "REAL",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        },
+        "jobs": {
+            "project_id": "TEXT NOT NULL DEFAULT ''",
+            "input_payload_json": "TEXT NOT NULL DEFAULT '{}'",
+            "output_path": "TEXT NOT NULL DEFAULT ''",
+            "log_path": "TEXT NOT NULL DEFAULT ''",
+            "reserved_units": "INTEGER NOT NULL DEFAULT 0",
+            "actual_units": "INTEGER NOT NULL DEFAULT 0",
+            "error_message": "TEXT NOT NULL DEFAULT ''",
+            "started_at": "TEXT",
+            "finished_at": "TEXT",
+        },
+        "projects": {
+            "output_dir": "TEXT NOT NULL DEFAULT ''",
+            "visibility": "TEXT NOT NULL DEFAULT 'private'",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        },
+    }
+    for table, columns in migrations.items():
+        if not table_columns(conn, table):
+            continue
+        for column, definition in columns.items():
+            add_column_if_missing(conn, table, column, definition)
+
+
 def reset_due_monthly_quotas(conn: sqlite3.Connection) -> None:
     period = current_quota_period()
     conn.execute(
@@ -121,6 +176,7 @@ def init_db() -> None:
             );
             """
         )
+        migrate_existing_schema(conn)
         conn.execute(
             """
             UPDATE jobs

@@ -41,6 +41,14 @@ sudo chown -R www-data:www-data /opt/ai_manga_workflow/data /opt/ai_manga_workfl
 
 ## 2. 安装 systemd 服务
 
+如果这是从旧版本升级，先备份数据：
+
+```bash
+manga-flow backup-server --output backups
+```
+
+服务启动时会自动检查 SQLite 表结构并补齐缺失列。升级前备份仍然是必要步骤。
+
 ```bash
 sudo cp deploy/systemd/ai-manga.service /etc/systemd/system/ai-manga.service
 sudo systemctl daemon-reload

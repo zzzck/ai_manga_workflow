@@ -112,6 +112,8 @@ AI_MANGA_DB_PATH=/opt/ai_manga_workflow/data/server/ai_manga.sqlite3
 
 服务器多人试用初期可以继续使用 SQLite。并发用户变多后，建议按 `部署方案.md` 迁移到 PostgreSQL。
 
+服务启动时会执行轻量 SQLite schema 检查：如果旧版本数据库已经存在，但缺少后续新增的列，例如 `reserved_quota`、`provider`、`model_name`、`output_path`、`reset_at` 等，会自动用 `ALTER TABLE ADD COLUMN` 补齐。升级前仍建议先备份数据库和产物。
+
 可以用内置命令备份当前 SQLite 快照、用户项目、全局项目和产物：
 
 ```bash
@@ -205,7 +207,7 @@ deploy/nginx/ai_manga_workflow.conf
 - 用数据库任务表或任务队列完全替代旧版 `web.py` 的 `WORKSHOP_JOBS`，让 AI 剧本工坊运行中的阶段详情也支持重启后恢复。
 - AI 剧本工坊按更细的实际执行阶段结算额度；当前第一版按整个工坊任务成功或失败结算。
 - 管理后台已经支持按用户筛选任务、查看失败率、删除失败任务和按模型聚合用量。后续如果要精确到每一次真实 API 调用，需要让各 provider 回写 token、图片、视频等真实成本。
-- PostgreSQL 迁移和 Alembic 迁移脚本。
+- SQLite 已有轻量自动列迁移；PostgreSQL 迁移和 Alembic 迁移脚本仍未实现。
 
 ## 本地验证清单
 
@@ -234,3 +236,4 @@ deploy/nginx/ai_manga_workflow.conf
 - 登录用户可以通过 `POST /api/auth/change-password` 修改自己的密码。
 - 管理员可以在 `/admin` 和 `/api/admin/stats` 查看基于额度流水聚合的模型用量。
 - 月度额度自动重置会清零已用额度并保留运行中预扣额度，后台用户表会显示当前额度周期。
+- 旧版 SQLite 库缺少新增列时，`db.init_db()` 会自动补齐列并保留既有用户、任务、额度和项目记录。
