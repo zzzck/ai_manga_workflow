@@ -418,6 +418,14 @@ def require_can_manage_user(operator: dict[str, Any], target_user_id: int) -> di
     return target
 
 
+def validate_role_value(role: str, operator: dict[str, Any]) -> str:
+    if role not in {"super_admin", "admin", "user"}:
+        raise HTTPException(status_code=400, detail="角色无效。")
+    if role == "super_admin" and operator["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="只有 super_admin 可以创建或授予 super_admin 角色。")
+    return role
+
+
 def filter_jobs_for_user(user: dict[str, Any], jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if is_admin(user):
         return jobs
@@ -495,12 +503,22 @@ def admin_page(user: dict[str, Any]) -> str:
         available = (item.get("monthly_quota") or 0) - (item.get("used_quota") or 0) - (item.get("reserved_quota") or 0)
         disabled_selected = "selected" if item["status"] == "disabled" else ""
         active_selected = "selected" if item["status"] == "active" else ""
+        role_options = []
+        for role in ["user", "admin", "super_admin"]:
+            if role == "super_admin" and user["role"] != "super_admin":
+                continue
+            role_selected = "selected" if item["role"] == role else ""
+            role_options.append(f"<option value='{role}' {role_selected}>{role}</option>")
         rows.append(
             f"<tr><td>{item['id']}</td><td>{html.escape(item['username'])}</td><td>{html.escape(item['role'])}</td>"
             f"<td>{html.escape(item['status'])}</td><td>{item.get('monthly_quota') or 0}</td>"
             f"<td>{item.get('used_quota') or 0}</td><td>{item.get('reserved_quota') or 0}</td><td>{available}</td>"
             f"<td><form method='post' action='/admin/users/{item['id']}/quota' class='inline-form'>"
             f"<input name='monthly_quota' type='number' value='{item.get('monthly_quota') or 0}'><button>改额度</button></form>"
+            f"<form method='post' action='/admin/users/{item['id']}/quota/add' class='inline-form'>"
+            f"<input name='amount' type='number' placeholder='增加额度'><button>加额度</button></form>"
+            f"<form method='post' action='/admin/users/{item['id']}/role' class='inline-form'>"
+            f"<select name='role'>{''.join(role_options)}</select><button>改角色</button></form>"
             f"<form method='post' action='/admin/users/{item['id']}/status' class='inline-form'>"
             f"<select name='status'><option value='active' {active_selected}>active</option><option value='disabled' {disabled_selected}>disabled</option></select><button>改状态</button></form>"
             f"<form method='post' action='/admin/users/{item['id']}/password' class='inline-form'>"
@@ -513,13 +531,21 @@ def admin_page(user: dict[str, Any]) -> str:
     user_stats = stats.get("users", {})
     job_rows = []
     for item in db.list_jobs(limit=30):
+        job_id = html.escape(str(item.get("id") or ""))
+        job_status = str(item.get("status") or "")
+        delete_form = ""
+        if job_status in {"failed", "canceled"}:
+            delete_form = (
+                f"<form method='post' action='/admin/jobs/{job_id}/delete' class='inline-form'>"
+                "<button class='danger-button'>删除记录</button></form>"
+            )
         job_rows.append(
-            f"<tr><td>{html.escape(str(item.get('id') or ''))}</td>"
+            f"<tr><td>{job_id}</td>"
             f"<td>{html.escape(str(item.get('username') or ''))}</td>"
             f"<td>{html.escape(str(item.get('job_type') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('status') or ''))}</td>"
+            f"<td>{html.escape(job_status)}</td>"
             f"<td>{item.get('reserved_units') or 0}</td><td>{item.get('actual_units') or 0}</td>"
-            f"<td>{html.escape(str(item.get('created_at') or ''))}</td></tr>"
+            f"<td>{html.escape(str(item.get('created_at') or ''))}</td><td>{delete_form}</td></tr>"
         )
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -545,6 +571,7 @@ def admin_page(user: dict[str, Any]) -> str:
     label {{ display:block; color:#667085; font-size:12px; margin-bottom:5px; }}
     input, select {{ width:100%; height:34px; border:1px solid #d8dde6; border-radius:6px; padding:0 8px; box-sizing:border-box; }}
     button {{ height:34px; border:0; border-radius:6px; background:#2563eb; color:#fff; font-weight:700; cursor:pointer; }}
+    .danger-button {{ background:#c2410c; }}
     a {{ color:#2563eb; text-decoration:none; }}
   </style>
 </head>
@@ -582,7 +609,7 @@ def admin_page(user: dict[str, Any]) -> str:
   <section>
     <h2>最近任务</h2>
     <table>
-      <thead><tr><th>ID</th><th>用户</th><th>类型</th><th>状态</th><th>预扣</th><th>实际</th><th>创建时间</th></tr></thead>
+      <thead><tr><th>ID</th><th>用户</th><th>类型</th><th>状态</th><th>预扣</th><th>实际</th><th>创建时间</th><th>操作</th></tr></thead>
       <tbody>{''.join(job_rows)}</tbody>
     </table>
     <p><a href="/api/admin/jobs" target="_blank">查看任务 JSON</a> · <a href="/api/admin/stats" target="_blank">查看统计 JSON</a></p>
@@ -652,10 +679,11 @@ async def admin_create_user(request: Request, user: dict[str, Any] = Depends(aut
     auth.require_admin(user)
     form = await form_data(request)
     try:
+        role = validate_role_value(form.get("role", "user"), user)
         db.create_user(
             username=form.get("username", "").strip(),
             password_hash=auth.hash_password(form.get("password", "")),
-            role=form.get("role", "user"),
+            role=role,
             monthly_quota=int(form.get("monthly_quota") or 500),
         )
     except Exception as exc:
@@ -668,6 +696,25 @@ async def admin_update_quota(user_id: int, request: Request, user: dict[str, Any
     require_can_manage_user(user, user_id)
     form = await form_data(request)
     db.update_user(user_id, monthly_quota=int(form.get("monthly_quota") or 0))
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/users/{user_id}/quota/add")
+async def admin_add_quota(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    require_can_manage_user(user, user_id)
+    form = await form_data(request)
+    db.add_user_quota(user_id, int(form.get("amount") or 0))
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/users/{user_id}/role")
+async def admin_update_role(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    require_can_manage_user(user, user_id)
+    if int(user["id"]) == user_id:
+        raise HTTPException(status_code=400, detail="不能修改当前登录账号的角色。")
+    form = await form_data(request)
+    role = validate_role_value(form.get("role", "user"), user)
+    db.update_user(user_id, role=role)
     return RedirectResponse("/admin", status_code=302)
 
 
@@ -702,9 +749,35 @@ def admin_reset_quota(user_id: int, user: dict[str, Any] = Depends(auth.current_
     return RedirectResponse("/admin", status_code=302)
 
 
+@app.post("/admin/jobs/{job_id}/delete")
+def admin_delete_failed_job_form(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    auth.require_admin(user)
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在。")
+    require_can_manage_user(user, int(job["user_id"]))
+    if not db.delete_terminal_failed_job(job_id):
+        raise HTTPException(status_code=400, detail="只能删除 failed 或 canceled 任务记录。")
+    return RedirectResponse("/admin", status_code=302)
+
+
 @app.get("/api/auth/me")
 def api_me(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     return {key: user[key] for key in ["id", "username", "role", "status", "display_name", "created_at", "last_login_at"]}
+
+
+@app.post("/api/auth/change-password")
+async def api_change_password(request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, str]:
+    payload = await request.json()
+    old_password = str(payload.get("old_password") or "")
+    new_password = str(payload.get("new_password") or "")
+    current = db.get_user_by_id(int(user["id"]))
+    if not current or not auth.verify_password(old_password, str(current.get("password_hash") or "")):
+        raise HTTPException(status_code=400, detail="当前密码错误。")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少 6 位。")
+    db.update_user(int(user["id"]), password_hash=auth.hash_password(new_password))
+    return {"status": "ok"}
 
 
 @app.get("/api/quota/me")
@@ -721,6 +794,38 @@ def api_usage_me(user: dict[str, Any] = Depends(auth.current_user)) -> list[dict
 def api_admin_users(user: dict[str, Any] = Depends(auth.current_user)) -> list[dict[str, Any]]:
     auth.require_admin(user)
     return db.list_users()
+
+
+@app.patch("/api/admin/users/{user_id}")
+async def api_admin_update_user(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    target = require_can_manage_user(user, user_id)
+    payload = await request.json()
+    updates: dict[str, Any] = {}
+    if "role" in payload:
+        if int(user["id"]) == user_id:
+            raise HTTPException(status_code=400, detail="不能修改当前登录账号的角色。")
+        updates["role"] = validate_role_value(str(payload["role"]), user)
+    if "status" in payload:
+        status_value = str(payload["status"])
+        if status_value not in {"active", "disabled"}:
+            raise HTTPException(status_code=400, detail="状态无效。")
+        if int(target["id"]) == int(user["id"]) and status_value == "disabled":
+            raise HTTPException(status_code=400, detail="不能禁用当前登录账号。")
+        updates["status"] = status_value
+    if "display_name" in payload:
+        updates["display_name"] = str(payload["display_name"])
+    if "monthly_quota" in payload:
+        updates["monthly_quota"] = int(payload["monthly_quota"])
+    if not updates:
+        return target
+    return db.update_user(user_id, **updates)
+
+
+@app.post("/api/admin/users/{user_id}/quota/add")
+async def api_admin_add_quota(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    require_can_manage_user(user, user_id)
+    payload = await request.json()
+    return db.add_user_quota(user_id, int(payload.get("amount") or 0))
 
 
 @app.get("/api/admin/usage")
@@ -745,6 +850,18 @@ def api_admin_jobs(
 def api_admin_stats(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     auth.require_admin(user)
     return db.admin_stats()
+
+
+@app.delete("/api/admin/jobs/{job_id}")
+def api_admin_delete_failed_job(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, str]:
+    auth.require_admin(user)
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在。")
+    require_can_manage_user(user, int(job["user_id"]))
+    if not db.delete_terminal_failed_job(job_id):
+        raise HTTPException(status_code=400, detail="只能删除 failed 或 canceled 任务记录。")
+    return {"status": "deleted", "job_id": job_id}
 
 
 @app.get("/api/state")

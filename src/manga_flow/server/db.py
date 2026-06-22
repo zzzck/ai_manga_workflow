@@ -250,6 +250,23 @@ def reset_user_quota(user_id: int) -> None:
         )
 
 
+def add_user_quota(user_id: int, amount: int) -> dict[str, Any]:
+    if amount <= 0:
+        raise ValueError("增加额度必须大于 0。")
+    with connect() as conn:
+        ensure_quota(conn, user_id)
+        conn.execute(
+            """
+            UPDATE user_quotas
+            SET monthly_quota = monthly_quota + ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            """,
+            (amount, user_id),
+        )
+    return quota_for_user(user_id)
+
+
 def reserve_quota(user_id: int, units: int, action_type: str, job_id: str | None = None) -> int:
     if units <= 0:
         return 0
@@ -474,6 +491,15 @@ def get_job(job_id: str) -> dict[str, Any] | None:
             (job_id,),
         ).fetchone()
         return row_to_dict(row)
+
+
+def delete_terminal_failed_job(job_id: str) -> bool:
+    with connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM jobs WHERE id = ? AND status IN ('failed', 'canceled')",
+            (job_id,),
+        )
+        return cursor.rowcount > 0
 
 
 def user_job_ids(user_id: int) -> set[str]:
