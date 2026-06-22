@@ -78,6 +78,7 @@ data/server/ai_manga.sqlite3-shm
 - 认证接口：`GET /api/auth/me`、`POST /api/auth/change-password`。
 - 额度接口：`GET /api/quota/me`。
 - 用量接口：`GET /api/usage/me`、`GET /api/admin/usage`。
+- 项目资源接口：`GET /api/projects` 返回当前用户可见项目及元数据，`POST /api/projects` 创建并保存新项目，`GET /api/projects/{path}` 读取项目，`PUT /api/projects/{path}` 更新项目；旧版 `/api/project` 仍保留给当前网页兼容使用。
 - 健康检查：`GET /healthz`，用于 Nginx、systemd 或部署脚本确认服务进程可访问。
 - 模型配置检查：`GET /api/provider-status`，读取流程配置和 `.env`，返回各模型槽是否启用、模型名、端点以及所需环境变量是否已配置；不会调用外部模型接口，也不会返回密钥原文。
 - 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs`、`GET /api/jobs/{job_id}`、`POST /api/jobs/{job_id}/cancel`，由数据库记录任务归属、状态、日志路径和额度结算结果。
@@ -90,6 +91,7 @@ data/server/ai_manga.sqlite3-shm
 - AI 剧本工坊结算：`/api/script/workshop` 创建任务时进入 `reserved_quota`，后台工坊任务完成后同步到数据库；成功转入 `used_quota`，失败或终止退回额度。
 - 月度额度周期：`reset_cycle=monthly` 的账号会在进入新月份后自动把 `used_quota` 清零，并把 `reset_at` 更新为当前 `YYYY-MM`；运行中任务的 `reserved_quota` 不会被月度重置清掉。
 - 普通用户项目隔离：项目 YAML 保存到 `data/users/<user_id>/projects/`。
+- 普通用户项目索引：新旧项目接口都会把项目写入数据库索引；项目列表读取时如果遇到单个 YAML 损坏，会在对应项目上返回 `valid=false` 和错误信息，而不是影响整个列表。
 - 普通用户输出隔离：生成任务使用用户专属运行时配置，输出到 `outputs/users/<user_id>/`。
 - 普通用户任务隔离：只能在任务列表和任务详情中看到自己的任务；管理员可以查看全部任务。
 - 普通用户文件隔离：`/api/file` 只允许访问自己的项目目录和输出目录；管理员可以访问项目根目录内文件。

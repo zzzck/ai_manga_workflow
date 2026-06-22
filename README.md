@@ -147,6 +147,17 @@ curl http://127.0.0.1:8000/healthz
 http://127.0.0.1:8000/api/provider-status
 ```
 
+可部署版还提供项目资源接口，便于后续把网页、管理后台或外部工具接到同一套后端：
+
+```text
+GET  /api/projects
+POST /api/projects
+GET  /api/projects/{path}
+PUT  /api/projects/{path}
+```
+
+这些接口都要求登录。普通用户只能看到和保存自己的 `data/users/<user_id>/projects/` 项目；管理员可以查看全局项目和所有用户项目。
+
 ## 网页端操作流程
 
 ### 1. 从主页选择入口

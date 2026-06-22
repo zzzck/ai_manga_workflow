@@ -479,6 +479,84 @@ def save_project_for_user(user: dict[str, Any], payload: dict[str, Any]) -> dict
     return response
 
 
+def default_project_payload(name: str = "") -> dict[str, Any]:
+    title = str(name or "新剧本").strip() or "新剧本"
+    project_id = legacy_web._project_id(title)
+    return {
+        "project_id": project_id,
+        "title": title,
+        "genre": "",
+        "format": "vertical_dynamic_comic",
+        "aspect_ratio": "9:16",
+        "target_duration_sec": 60,
+        "audience": "",
+        "logline": "待补充。",
+        "visual_style": "",
+        "tone": "",
+        "characters": [],
+        "locations": [],
+        "beats": [],
+    }
+
+
+def project_metadata(user: dict[str, Any], rel_path: str, record: dict[str, Any] | None = None) -> dict[str, Any]:
+    path = (ROOT / rel_path).resolve()
+    payload: dict[str, Any] = {
+        "path": rel_path,
+        "name": record.get("name") if record else path.stem,
+        "project_id": "",
+        "title": "",
+        "owner_id": record.get("user_id") if record else None,
+        "owner_username": record.get("username") if record else "",
+        "visibility": record.get("visibility") if record else "private",
+        "output_dir": record.get("output_dir") if record else "",
+        "updated_at": record.get("updated_at") if record else "",
+        "exists": path.exists(),
+        "valid": False,
+        "error": "",
+    }
+    try:
+        if path.exists():
+            project = legacy_web._project_from_content(path.read_text(encoding="utf-8"))
+            payload.update(
+                {
+                    "name": project.title or payload["name"],
+                    "project_id": project.project_id,
+                    "title": project.title,
+                    "valid": True,
+                }
+            )
+            if not record and not is_admin(user):
+                db.upsert_project(
+                    int(user["id"]),
+                    project.title or project.project_id,
+                    rel_path,
+                    output_dir=relative(user_output_dir(user)),
+                )
+    except Exception as exc:
+        payload["error"] = str(exc)
+    try:
+        if path.exists():
+            payload["file_mtime"] = int(path.stat().st_mtime)
+    except OSError:
+        payload["file_mtime"] = 0
+    return payload
+
+
+def list_project_resources(user: dict[str, Any]) -> list[dict[str, Any]]:
+    db_records = db.list_projects(None if is_admin(user) else int(user["id"]))
+    records_by_path = {str(record.get("yaml_path") or ""): record for record in db_records}
+    resources: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for rel_path in list_user_projects(user):
+        resources.append(project_metadata(user, rel_path, records_by_path.get(rel_path)))
+        seen_paths.add(rel_path)
+    for rel_path, record in records_by_path.items():
+        if rel_path not in seen_paths:
+            resources.append(project_metadata(user, rel_path, record))
+    return sorted(resources, key=lambda item: (not item.get("valid", False), str(item.get("name") or item.get("path") or "")))
+
+
 def prepare_user_stage_payload(user: dict[str, Any], payload: dict[str, Any], job_id_hint: str) -> dict[str, Any]:
     next_payload = dict(payload)
     next_payload["project"] = user_safe_project_path(user, str(payload.get("project") or ""), for_write=False)
@@ -1043,6 +1121,58 @@ async def api_project_save(request: Request, user: dict[str, Any] = Depends(auth
     payload = await request.json()
     try:
         return save_project_for_user(user, payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/projects")
+def api_projects(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    return {"projects": list_project_resources(user)}
+
+
+@app.get("/api/projects/{project_path:path}")
+def api_project_resource(project_path: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    try:
+        return read_project_for_user(user, project_path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/projects")
+async def api_projects_create(request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    payload = await request.json()
+    project_payload = dict(payload)
+    if "data" not in project_payload and "content" not in project_payload:
+        name = str(project_payload.get("name") or project_payload.get("title") or "新剧本")
+        project_payload["data"] = default_project_payload(name)
+    if not str(project_payload.get("path") or "").strip():
+        source_name = (
+            project_payload.get("name")
+            or project_payload.get("title")
+            or (project_payload.get("data") or {}).get("title")
+            or "new_manga_project"
+        )
+        project_payload["path"] = f"{legacy_web._safe_project_file_stem(source_name)}.yaml"
+    try:
+        result = save_project_for_user(user, project_payload)
+        result["project"] = project_metadata(user, str(result["path"]))
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/projects/{project_path:path}")
+async def api_projects_update(
+    project_path: str,
+    request: Request,
+    user: dict[str, Any] = Depends(auth.current_user),
+) -> dict[str, Any]:
+    payload = await request.json()
+    payload["path"] = project_path
+    try:
+        result = save_project_for_user(user, payload)
+        result["project"] = project_metadata(user, str(result["path"]))
+        return result
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
