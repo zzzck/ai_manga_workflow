@@ -91,7 +91,7 @@ def run_command(
     project: Path = typer.Option(Path("data/projects/demo_story.yaml"), "--project", "-p", help="项目设定文件。"),
     episode: int | None = typer.Option(None, "--episode", "-e", help="分集编号。默认读取配置。"),
 ) -> None:
-    """Run the placeholder workflow and create production artifacts."""
+    """Run the structure workflow and create production artifacts."""
     result = run_pipeline(project_path=project, config_path=config, episode=episode)
     console.print(f"[bold green]Workflow complete[/bold green]: {result.run_dir}")
     console.print(f"Shots: {result.shot_count}, duration: {result.total_duration_sec}s")
@@ -179,6 +179,17 @@ def web_command(
     from .web import serve
 
     serve(host=host, port=port)
+
+
+@app.command("serve")
+def serve_command(
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址。"),
+    port: int = typer.Option(8000, "--port", help="监听端口。"),
+) -> None:
+    """Start the deployable FastAPI server with login, admin, quota and protected console."""
+    import uvicorn
+
+    uvicorn.run("manga_flow.server.app:app", host=host, port=port, reload=False)
 
 
 @app.command("init-project")

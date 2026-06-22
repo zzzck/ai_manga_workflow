@@ -57,6 +57,8 @@ outputs/demo_rebirth/episode_001/
 
 推荐使用网页端来编写剧本、选择角色音色、分阶段生成图片/配音/视频，并查看日志和产物。
 
+如果要本机单人开发调试，可以继续使用旧的本地控制台：
+
 先进入项目目录并激活环境：
 
 ```bash
@@ -95,6 +97,35 @@ http://127.0.0.1:8766
 ```
 
 不要关闭运行网页服务的终端窗口。浏览器刷新不会中断后台任务，但如果停止网页服务，页面无法继续查看任务状态。
+
+## 启动可部署版服务
+
+如果要按 `部署方案.md` 的方向做多人试用，请启动可部署版 FastAPI 服务。它包含登录、管理员后台、用户额度、用量流水和受保护的工作台入口：
+
+```bash
+cd /Users/zzzck/Documents/yxy_html/ai_manga_workflow
+conda activate ai-manga-flow
+manga-flow serve --host 127.0.0.1 --port 8000
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8000
+```
+
+首次启动会自动创建本地超级管理员：
+
+```text
+账号：admin
+密码：admin123456
+```
+
+部署到服务器前必须在 `.env` 中修改 `AI_MANGA_SECRET_KEY` 和 `AI_MANGA_ADMIN_PASSWORD`。更多说明见：
+
+```text
+docs/DEPLOYABLE_SERVER.md
+```
 
 ## 网页端操作流程
 

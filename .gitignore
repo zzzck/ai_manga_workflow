@@ -24,3 +24,4 @@ __pycache__/
 *.webp
 outputs/*
 !outputs/.gitkeep
+data/server/
