@@ -135,3 +135,14 @@ manga-flow backup-server --output backups
 ```
 
 备份命令会用 SQLite backup API 生成一致性数据库快照，并打包 `data/users`、`data/projects` 和 `outputs`。默认不包含 `.env`，避免把模型密钥和管理员配置放进备份包；如果确实需要连同 `.env` 备份，使用 `--include-env` 并限制备份文件访问权限。
+
+恢复备份前先停止服务：
+
+```bash
+sudo systemctl stop ai-manga
+manga-flow restore-server-backup backups/ai_manga_backup_YYYYMMDD_HHMMSS.zip
+manga-flow restore-server-backup backups/ai_manga_backup_YYYYMMDD_HHMMSS.zip --apply --force
+sudo systemctl start ai-manga
+```
+
+第一条 `restore-server-backup` 只预览，不写入文件；确认后再使用 `--apply --force`。默认不会恢复 `.env`，需要覆盖当前密钥配置时才加 `--include-env`。

@@ -144,6 +144,20 @@ manga-flow backup-server --output backups
 
 默认不包含 `.env`，避免把模型密钥和管理员密码配置放进备份包。确实需要同时备份 `.env` 时，使用 `--include-env` 并限制备份文件访问权限。
 
+恢复备份前应先停止服务，避免运行中的进程继续写数据库或输出目录。恢复命令默认只预览计划，不写入本地文件：
+
+```bash
+manga-flow restore-server-backup backups/ai_manga_backup_YYYYMMDD_HHMMSS.zip
+```
+
+确认备份内容和覆盖范围后，再显式执行：
+
+```bash
+manga-flow restore-server-backup backups/ai_manga_backup_YYYYMMDD_HHMMSS.zip --apply --force
+```
+
+`.env` 默认不会恢复；只有确认要覆盖当前密钥配置时才加 `--include-env`。
+
 ## 额度规则
 
 第一版采用内部点数，不按真实模型成本精算：
@@ -269,4 +283,4 @@ deploy/nginx/ai_manga_workflow.conf
 - 管理员可以在 `/admin` 和 `/api/admin/stats` 查看基于额度流水聚合的模型用量。
 - 月度额度自动重置会清零已用额度并保留运行中预扣额度，后台用户表会显示当前额度周期。
 - 旧版 SQLite 库缺少新增列时，`db.init_db()` 会自动补齐列并保留既有用户、任务、额度和项目记录。
-- `tests/test_deploy_server.py` 覆盖登录保护、项目资源 API、工坊任务数据库恢复、并发限制不预扣额度，以及后台运行信息不泄露密钥。
+- `tests/test_deploy_server.py` 覆盖登录保护、项目资源 API、工坊任务数据库恢复、并发限制不预扣额度、后台运行信息不泄露密钥，以及备份恢复命令的覆盖保护。

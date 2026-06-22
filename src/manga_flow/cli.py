@@ -104,6 +104,28 @@ def _add_deploy_check(rows: list[tuple[str, str, str]], status: str, item: str, 
     rows.append((status, item, detail))
 
 
+def _is_allowed_restore_member(name: str, include_env: bool) -> bool:
+    path = Path(name)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    if name == ".env":
+        return include_env
+    allowed_prefixes = [
+        "data/server/ai_manga.sqlite3",
+        "data/users/",
+        "data/projects/",
+        "outputs/",
+    ]
+    return any(name == prefix.rstrip("/") or name.startswith(prefix) for prefix in allowed_prefixes)
+
+
+def _restore_target_path(root: Path, member_name: str) -> Path:
+    target = (root / member_name).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError(f"Invalid backup member path: {member_name}")
+    return target
+
+
 @app.command("check")
 def check_config(
     config: Path = typer.Option(Path("config/pipeline.example.yaml"), "--config", "-c", help="工作流配置文件。"),
@@ -412,6 +434,77 @@ def backup_server_command(
     console.print(f"SQLite source: {db_path if db_path.exists() else 'not found'}")
     if not include_env:
         console.print("[yellow]Note:[/yellow] .env was not included. Keep model keys and admin secrets backed up separately.")
+
+
+@app.command("restore-server-backup")
+def restore_server_backup_command(
+    backup: Path = typer.Argument(..., help="由 backup-server 生成的 zip 备份文件。"),
+    apply: bool = typer.Option(False, "--apply", help="真正写入文件。默认只预览，不修改本地数据。"),
+    force: bool = typer.Option(False, "--force", help="允许覆盖已存在文件。必须与 --apply 一起使用。"),
+    include_env: bool = typer.Option(False, "--include-env", help="允许恢复 .env。默认跳过，避免覆盖当前密钥配置。"),
+) -> None:
+    """Restore a deployable-server backup zip with explicit apply/force safeguards."""
+    if not backup.exists():
+        raise typer.BadParameter(f"Backup file does not exist: {backup}")
+    if backup.suffix.lower() != ".zip":
+        raise typer.BadParameter("Backup file must be a .zip file.")
+
+    root = Path.cwd().resolve()
+    restored = 0
+    skipped = 0
+    conflicts: list[str] = []
+    invalid: list[str] = []
+    candidates: list[tuple[zipfile.ZipInfo, Path]] = []
+    with zipfile.ZipFile(backup) as zip_file:
+        for info in zip_file.infolist():
+            name = info.filename
+            if info.is_dir():
+                continue
+            if not _is_allowed_restore_member(name, include_env):
+                skipped += 1
+                continue
+            try:
+                target = _restore_target_path(root, name)
+            except ValueError:
+                invalid.append(name)
+                continue
+            candidates.append((info, target))
+            if target.exists() and not force:
+                conflicts.append(name)
+
+        table = Table(title="Restore Preview" if not apply else "Restore Plan")
+        table.add_column("Member")
+        table.add_column("Target")
+        table.add_column("Status")
+        for info, target in candidates:
+            if target.exists() and not force:
+                status_text = "conflict"
+            elif target.exists() and force:
+                status_text = "overwrite"
+            else:
+                status_text = "create"
+            table.add_row(info.filename, str(target), status_text)
+        console.print(table)
+        if skipped:
+            console.print(f"Skipped members: {skipped}")
+        if invalid:
+            console.print("[red]Invalid members:[/red] " + ", ".join(invalid))
+        if conflicts:
+            console.print("[red]Conflicts:[/red] " + ", ".join(conflicts))
+            console.print("Use --apply --force to overwrite existing files after confirming the backup is correct.")
+            raise typer.Exit(1)
+        if not apply:
+            console.print("Dry run only. Re-run with --apply to restore files.")
+            return
+
+        for info, target in candidates:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zip_file.open(info) as source, target.open("wb") as destination:
+                destination.write(source.read())
+            restored += 1
+    console.print(f"[bold green]Restore complete[/bold green]: {restored} files restored from {backup}")
+    if not include_env:
+        console.print("[yellow]Note:[/yellow] .env was not restored. Use --include-env only when you intend to overwrite local secrets.")
 
 
 @app.command("init-project")

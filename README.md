@@ -363,6 +363,18 @@ manga-flow backup-server --output backups
 
 默认会打包 SQLite 快照、`data/users`、`data/projects` 和 `outputs`，不会包含 `.env`。如果确实要把 `.env` 一起放进备份包，需要显式加 `--include-env`，并妥善保存备份文件。
 
+恢复备份时默认只预览，不会写入文件：
+
+```bash
+manga-flow restore-server-backup backups/ai_manga_backup_YYYYMMDD_HHMMSS.zip
+```
+
+确认无误后再执行：
+
+```bash
+manga-flow restore-server-backup backups/ai_manga_backup_YYYYMMDD_HHMMSS.zip --apply --force
+```
+
 启动本地网页控制台：
 
 ```bash

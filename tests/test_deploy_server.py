@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import importlib
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from typer.testing import CliRunner
+
+from manga_flow.cli import app as cli_app
 
 
 def load_server(tmp_path: Path, monkeypatch):
@@ -134,3 +138,42 @@ def test_admin_server_info_does_not_leak_api_keys(tmp_path: Path, monkeypatch) -
         assert admin_page.status_code == 200
         assert "运行状态" in admin_page.text
         assert "sk-test-should-not-leak" not in admin_page.text
+
+
+def test_backup_restore_requires_explicit_apply_and_force(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AI_MANGA_DB_PATH", str(tmp_path / "data" / "server" / "ai_manga.sqlite3"))
+
+    db_path = tmp_path / "data" / "server" / "ai_manga.sqlite3"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE smoke (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.execute("INSERT INTO smoke (name) VALUES ('backup')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    (tmp_path / "data" / "projects").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "projects" / "demo.yaml").write_text("title: backup\n", encoding="utf-8")
+    (tmp_path / "data" / "users" / "1").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "users" / "1" / "note.txt").write_text("user backup\n", encoding="utf-8")
+    (tmp_path / "outputs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "outputs" / "result.txt").write_text("output backup\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("SECRET=backup\n", encoding="utf-8")
+
+    runner = CliRunner()
+    backup_result = runner.invoke(cli_app, ["backup-server", "--output", "backups", "--include-env"])
+    assert backup_result.exit_code == 0, backup_result.output
+    backup_zip = next((tmp_path / "backups").glob("ai_manga_backup_*.zip"))
+
+    (tmp_path / "data" / "projects" / "demo.yaml").write_text("title: changed\n", encoding="utf-8")
+    preview = runner.invoke(cli_app, ["restore-server-backup", str(backup_zip), "--include-env"])
+    assert preview.exit_code == 1, preview.output
+    assert "Conflicts" in preview.output
+    assert (tmp_path / "data" / "projects" / "demo.yaml").read_text(encoding="utf-8") == "title: changed\n"
+
+    restored = runner.invoke(cli_app, ["restore-server-backup", str(backup_zip), "--apply", "--force", "--include-env"])
+    assert restored.exit_code == 0, restored.output
+    assert (tmp_path / "data" / "projects" / "demo.yaml").read_text(encoding="utf-8") == "title: backup\n"
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "SECRET=backup\n"
