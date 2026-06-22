@@ -36,6 +36,14 @@ AI_MANGA_MAX_ACTIVE_JOBS_TOTAL=8
 
 `AI_MANGA_MAX_ACTIVE_JOBS_PER_USER` 和 `AI_MANGA_MAX_ACTIVE_JOBS_TOTAL` 用于限制排队/运行中的长任务数量，防止试用服务器被任务堆满；设为 `0` 表示不限制。
 
+启动服务前先做本地部署自检：
+
+```bash
+manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env
+```
+
+自检会检查 `.env`、管理员密码、数据库路径、可写目录和模型环境变量，不会调用外部模型接口。
+
 确保运行用户可以写入数据目录：
 
 ```bash

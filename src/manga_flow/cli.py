@@ -7,7 +7,7 @@ import sqlite3
 import zipfile
 
 import typer
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from rich.console import Console
 from rich.table import Table
 
@@ -57,6 +57,51 @@ def _backup_sqlite_database(source: Path, target: Path) -> bool:
     finally:
         source_conn.close()
     return True
+
+
+def _env_lookup(name: str, env_values: dict[str, str | None]) -> str:
+    return str(env_values.get(name) or "") or os.getenv(name, "")
+
+
+def _provider_required_envs(provider: object) -> list[str]:
+    names: list[str] = []
+    api_key_env = getattr(provider, "api_key_env", "")
+    if api_key_env:
+        names.append(str(api_key_env))
+    extra = getattr(provider, "extra", {}) or {}
+    provider_name = getattr(provider, "provider", "")
+    if provider_name == "tencentcloud":
+        for key in ["secret_id_env", "secret_key_env"]:
+            value = extra.get(key)
+            if isinstance(value, str) and value:
+                names.append(value)
+        if extra.get("include_app_id", False):
+            value = extra.get("app_id_env")
+            if isinstance(value, str) and value:
+                names.append(value)
+    return sorted(dict.fromkeys(names))
+
+
+def _writable_path_state(path: Path, *, directory: bool) -> tuple[bool, str]:
+    target = path if directory else path.parent
+    if target.exists() and not target.is_dir():
+        return False, f"{target} 不是目录"
+    if not target.exists():
+        parent = target.parent
+        if not parent.exists():
+            return False, f"父目录不存在：{parent}"
+        target = parent
+    test_file = target / ".ai_manga_write_test"
+    try:
+        test_file.write_text("ok", encoding="utf-8")
+        test_file.unlink(missing_ok=True)
+        return True, str(target)
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _add_deploy_check(rows: list[tuple[str, str, str]], status: str, item: str, detail: str) -> None:
+    rows.append((status, item, detail))
 
 
 @app.command("check")
@@ -125,6 +170,97 @@ def provider_status(
             key_state,
         )
     console.print(table)
+
+
+@app.command("deploy-check")
+def deploy_check_command(
+    config: Path = typer.Option(Path("config/pipeline.siliconflow.yaml"), "--config", "-c", help="部署使用的流程配置文件。"),
+    env_file: Path = typer.Option(Path(".env"), "--env-file", help="部署使用的环境变量文件。"),
+    strict: bool = typer.Option(True, "--strict/--no-strict", help="存在 FAIL 项时是否返回非 0 退出码。"),
+) -> None:
+    """Check local deploy prerequisites without calling remote model APIs."""
+    env_values = dotenv_values(env_file) if env_file.exists() else {}
+    if env_file.exists():
+        load_dotenv(env_file, override=True)
+
+    rows: list[tuple[str, str, str]] = []
+    _add_deploy_check(rows, "OK" if env_file.exists() else "FAIL", ".env", str(env_file) if env_file.exists() else f"缺少 {env_file}")
+
+    secret_key = _env_lookup("AI_MANGA_SECRET_KEY", env_values)
+    if not secret_key:
+        _add_deploy_check(rows, "FAIL", "AI_MANGA_SECRET_KEY", "未设置")
+    elif secret_key in {"local-dev-change-me", "change-this-long-random-string"}:
+        _add_deploy_check(rows, "FAIL", "AI_MANGA_SECRET_KEY", "仍是示例值，部署前必须更换")
+    elif len(secret_key) < 24:
+        _add_deploy_check(rows, "WARN", "AI_MANGA_SECRET_KEY", "长度偏短，建议使用更长随机字符串")
+    else:
+        _add_deploy_check(rows, "OK", "AI_MANGA_SECRET_KEY", "已设置")
+
+    admin_password = _env_lookup("AI_MANGA_ADMIN_PASSWORD", env_values)
+    if not admin_password:
+        _add_deploy_check(rows, "FAIL", "AI_MANGA_ADMIN_PASSWORD", "未设置")
+    elif admin_password in {"admin123456", "change-this-password"}:
+        _add_deploy_check(rows, "FAIL", "AI_MANGA_ADMIN_PASSWORD", "仍是默认或示例密码")
+    elif len(admin_password) < 10:
+        _add_deploy_check(rows, "WARN", "AI_MANGA_ADMIN_PASSWORD", "长度偏短，建议至少 10 位")
+    else:
+        _add_deploy_check(rows, "OK", "AI_MANGA_ADMIN_PASSWORD", "已设置")
+
+    db_path = Path(_env_lookup("AI_MANGA_DB_PATH", env_values) or "data/server/ai_manga.sqlite3").expanduser().resolve()
+    writable, detail = _writable_path_state(db_path, directory=False)
+    _add_deploy_check(rows, "OK" if writable else "FAIL", "SQLite 路径", f"{db_path}；{detail}")
+    for label, path in [
+        ("用户数据目录", Path("data/users")),
+        ("全局项目目录", Path("data/projects")),
+        ("输出目录", Path("outputs")),
+    ]:
+        writable, detail = _writable_path_state(path, directory=True)
+        _add_deploy_check(rows, "OK" if writable else "FAIL", label, detail)
+
+    for name in ["AI_MANGA_MAX_ACTIVE_JOBS_PER_USER", "AI_MANGA_MAX_ACTIVE_JOBS_TOTAL"]:
+        raw = _env_lookup(name, env_values) or "0"
+        try:
+            value = int(raw)
+            _add_deploy_check(rows, "OK" if value >= 0 else "FAIL", name, f"{value}；0 表示不限制")
+        except ValueError:
+            _add_deploy_check(rows, "FAIL", name, f"不是整数：{raw}")
+
+    if not config.exists():
+        _add_deploy_check(rows, "FAIL", "流程配置", f"不存在：{config}")
+    else:
+        try:
+            pipeline_config = load_config(config)
+            enabled_slots = [name for name, provider in pipeline_config.providers.items() if provider.enabled]
+            missing_envs: list[str] = []
+            for provider in pipeline_config.providers.values():
+                if not provider.enabled:
+                    continue
+                for env_name in _provider_required_envs(provider):
+                    if not _env_lookup(env_name, env_values):
+                        missing_envs.append(env_name)
+            if missing_envs:
+                _add_deploy_check(rows, "FAIL", "模型环境变量", "缺少：" + ", ".join(sorted(dict.fromkeys(missing_envs))))
+            elif enabled_slots:
+                _add_deploy_check(rows, "OK", "模型环境变量", "已配置启用槽位：" + ", ".join(enabled_slots))
+            else:
+                _add_deploy_check(rows, "WARN", "模型环境变量", "没有启用的 provider 槽位")
+        except Exception as exc:
+            _add_deploy_check(rows, "FAIL", "流程配置", str(exc))
+
+    table = Table(title="Deploy Check")
+    table.add_column("Status")
+    table.add_column("Item")
+    table.add_column("Detail")
+    for status, item, detail in rows:
+        style = "green" if status == "OK" else ("yellow" if status == "WARN" else "red")
+        table.add_row(f"[{style}]{status}[/{style}]", item, detail)
+    console.print(table)
+
+    fail_count = sum(1 for status, _, _ in rows if status == "FAIL")
+    warn_count = sum(1 for status, _, _ in rows if status == "WARN")
+    console.print(f"Summary: {fail_count} FAIL, {warn_count} WARN")
+    if strict and fail_count:
+        raise typer.Exit(1)
 
 
 @app.command("run")

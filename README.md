@@ -340,6 +340,12 @@ manga-flow init-project urban_rebirth_001 "重生后我只想搞钱"
 manga-flow provider-status --config config/pipeline.siliconflow.yaml
 ```
 
+检查可部署版服务上线前配置：
+
+```bash
+manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env
+```
+
 备份可部署版服务数据：
 
 ```bash

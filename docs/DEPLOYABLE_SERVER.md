@@ -87,6 +87,7 @@ data/server/ai_manga.sqlite3-shm
 - 管理任务和统计接口：`GET /api/admin/jobs` 支持按用户、状态和任务类型筛选，`DELETE /api/admin/jobs/{job_id}` 可删除 failed/canceled 任务记录，`GET /api/admin/stats` 返回用户、额度、任务状态、失败率、按模型聚合的用量和用量摘要。
 - 管理用户接口：`PATCH /api/admin/users/{user_id}` 可修改角色、状态、显示名和月额度，`POST /api/admin/users/{user_id}/quota/add` 可手动增加额度。
 - 管理运行信息：后台 `/admin` 会显示数据库路径、项目/输出目录、模型配置摘要、健康检查入口和备份命令；`GET /api/admin/server-info` 返回同样的 JSON 摘要，不包含密钥原文。
+- 部署自检命令：`manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env` 会检查 `.env`、默认密码风险、SQLite 路径、数据目录可写性和模型环境变量，不会调用外部模型接口。
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
 - 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file` 等均要求登录。
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
@@ -117,6 +118,14 @@ AI_MANGA_DB_PATH=/opt/ai_manga_workflow/data/server/ai_manga.sqlite3
 服务器多人试用初期可以继续使用 SQLite。并发用户变多后，建议按 `部署方案.md` 迁移到 PostgreSQL。
 
 服务启动时会执行轻量 SQLite schema 检查：如果旧版本数据库已经存在，但缺少后续新增的列，例如 `reserved_quota`、`provider`、`model_name`、`output_path`、`reset_at` 等，会自动用 `ALTER TABLE ADD COLUMN` 补齐。升级前仍建议先备份数据库和产物。
+
+启动服务前建议先运行部署自检：
+
+```bash
+manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env
+```
+
+自检失败时默认返回非 0 退出码，适合放进手动部署流程或简单 CI；如果只想查看报告，可加 `--no-strict`。
 
 可以用内置命令备份当前 SQLite 快照、用户项目、全局项目和产物：
 
