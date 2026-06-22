@@ -127,6 +127,13 @@ manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .en
 
 自检失败时默认返回非 0 退出码，适合放进手动部署流程或简单 CI；如果只想查看报告，可加 `--no-strict`。
 
+本地修改部署版后端后，可以运行回归测试：
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest tests/test_deploy_server.py -q
+```
+
 可以用内置命令备份当前 SQLite 快照、用户项目、全局项目和产物：
 
 ```bash
@@ -260,3 +267,4 @@ deploy/nginx/ai_manga_workflow.conf
 - 管理员可以在 `/admin` 和 `/api/admin/stats` 查看基于额度流水聚合的模型用量。
 - 月度额度自动重置会清零已用额度并保留运行中预扣额度，后台用户表会显示当前额度周期。
 - 旧版 SQLite 库缺少新增列时，`db.init_db()` 会自动补齐列并保留既有用户、任务、额度和项目记录。
+- `tests/test_deploy_server.py` 覆盖登录保护、项目资源 API、工坊任务数据库恢复、并发限制不预扣额度，以及后台运行信息不泄露密钥。

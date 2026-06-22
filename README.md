@@ -346,6 +346,13 @@ manga-flow provider-status --config config/pipeline.siliconflow.yaml
 manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env
 ```
 
+运行部署版后端回归测试：
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest tests/test_deploy_server.py -q
+```
+
 备份可部署版服务数据：
 
 ```bash
