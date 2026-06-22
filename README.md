@@ -353,6 +353,8 @@ python -m pip install -e ".[dev]"
 python -m pytest tests/test_deploy_server.py -q
 ```
 
+仓库包含 GitHub Actions 工作流 `.github/workflows/deploy-tests.yml`，推送到 `main` 或创建 PR 时会自动运行部署自检和部署版后端测试。
+
 备份可部署版服务数据：
 
 ```bash

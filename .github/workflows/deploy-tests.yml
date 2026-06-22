@@ -1,0 +1,42 @@
+name: Deploy Server Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  deploy-server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: python -m pip install -e ".[dev]"
+
+      - name: Create CI env file
+        run: |
+          cat > .env.ci <<'EOF'
+          AI_MANGA_SECRET_KEY=0123456789abcdef0123456789abcdef
+          AI_MANGA_ADMIN_PASSWORD=ci-admin-password-123
+          AI_MANGA_DB_PATH=data/server/ci.sqlite3
+          AI_MANGA_MAX_ACTIVE_JOBS_PER_USER=2
+          AI_MANGA_MAX_ACTIVE_JOBS_TOTAL=8
+          SILICONFLOW_API_KEY=sk-ci-placeholder
+          TENCENTCLOUD_SECRET_ID=ci-secret-id
+          TENCENTCLOUD_SECRET_KEY=ci-secret-key
+          TENCENTCLOUD_TTS_APP_ID=123456
+          EOF
+
+      - name: Deploy check
+        run: manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env.ci
+
+      - name: Test deploy server
+        run: python -m pytest tests/test_deploy_server.py -q

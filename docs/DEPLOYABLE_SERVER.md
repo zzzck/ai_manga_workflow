@@ -134,6 +134,8 @@ python -m pip install -e ".[dev]"
 python -m pytest tests/test_deploy_server.py -q
 ```
 
+仓库中的 `.github/workflows/deploy-tests.yml` 会在推送到 `main` 或创建 PR 时自动运行同类检查：安装 `.[dev]`、生成临时 `.env.ci`、执行 `manga-flow deploy-check`，再运行 `tests/test_deploy_server.py`。
+
 可以用内置命令备份当前 SQLite 快照、用户项目、全局项目和产物：
 
 ```bash
