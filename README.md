@@ -141,6 +141,12 @@ deploy/nginx/ai_manga_workflow.conf
 curl http://127.0.0.1:8000/healthz
 ```
 
+管理员登录 `/admin` 后，可以在“运行状态”区块查看数据库路径、数据目录、模型配置摘要、健康检查入口和备份命令。对应 JSON 接口是：
+
+```text
+http://127.0.0.1:8000/api/admin/server-info
+```
+
 登录后可以检查模型槽位和 `.env` 是否配置完整：
 
 ```text

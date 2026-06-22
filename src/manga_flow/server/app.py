@@ -708,6 +708,76 @@ def require_job_access(user: dict[str, Any], job_id: str) -> None:
         raise HTTPException(status_code=403, detail="没有权限访问该任务。")
 
 
+def path_state(path: Path) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "is_dir": path.is_dir(),
+        "is_file": path.is_file(),
+        "size_bytes": path.stat().st_size if path.exists() and path.is_file() else 0,
+    }
+
+
+def admin_server_info() -> dict[str, Any]:
+    db_path = db.database_path()
+    try:
+        provider_status = provider_status_payload("config/pipeline.siliconflow.yaml", ".env")
+    except Exception as exc:
+        provider_status = {
+            "ok": False,
+            "error": str(exc),
+            "missing_required_envs": [],
+            "slots": [],
+        }
+    return {
+        "root": str(ROOT),
+        "database": path_state(db_path),
+        "data_dirs": {
+            "global_projects": path_state(GLOBAL_PROJECT_DIR),
+            "user_data": path_state(USER_DATA_DIR),
+            "user_outputs": path_state(USER_OUTPUT_DIR),
+            "server_data": path_state(db_path.parent),
+        },
+        "healthz": "/healthz",
+        "provider_status": {
+            "ok": bool(provider_status.get("ok")),
+            "missing_required_envs": provider_status.get("missing_required_envs", []),
+            "slot_count": len(provider_status.get("slots", [])),
+            "error": provider_status.get("error", ""),
+        },
+        "commands": {
+            "serve": "manga-flow serve --host 127.0.0.1 --port 8000",
+            "backup": "manga-flow backup-server --output backups",
+            "provider_status": "manga-flow provider-status --config config/pipeline.siliconflow.yaml",
+        },
+    }
+
+
+def admin_server_info_html() -> str:
+    info = admin_server_info()
+    provider = info["provider_status"]
+    dirs = info["data_dirs"]
+    provider_text = "正常" if provider.get("ok") else "需要检查"
+    missing_envs = ", ".join(str(item) for item in provider.get("missing_required_envs") or []) or "-"
+    error_text = str(provider.get("error") or "")
+    rows = [
+        ("项目目录", info["root"]),
+        ("SQLite 数据库", f"{info['database']['path']} ({'存在' if info['database']['exists'] else '不存在'})"),
+        ("全局项目目录", f"{dirs['global_projects']['path']} ({'存在' if dirs['global_projects']['exists'] else '不存在'})"),
+        ("用户数据目录", f"{dirs['user_data']['path']} ({'存在' if dirs['user_data']['exists'] else '不存在'})"),
+        ("用户输出目录", f"{dirs['user_outputs']['path']} ({'存在' if dirs['user_outputs']['exists'] else '不存在'})"),
+        ("模型配置状态", f"{provider_text}；缺失环境变量：{missing_envs}"),
+        ("健康检查", info["healthz"]),
+        ("备份命令", info["commands"]["backup"]),
+    ]
+    if error_text:
+        rows.append(("模型配置错误", error_text))
+    return "".join(
+        f"<tr><th>{html.escape(label)}</th><td>{html.escape(str(value))}</td></tr>"
+        for label, value in rows
+    )
+
+
 def login_page(error: str = "") -> str:
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -863,6 +933,13 @@ def admin_page(user: dict[str, Any]) -> str:
       <div class="stat-card"><strong>{quota_stats.get('reserved_quota') or 0}</strong><span>预扣额度</span></div>
       <div class="stat-card"><strong>{round(float(job_stats.get('failure_rate') or 0) * 100, 1)}%</strong><span>任务失败/终止率</span></div>
     </div>
+  </section>
+  <section>
+    <h2>运行状态</h2>
+    <table>
+      <tbody>{admin_server_info_html()}</tbody>
+    </table>
+    <p><a href="/healthz" target="_blank">健康检查</a> · <a href="/api/provider-status" target="_blank">模型配置状态</a> · <a href="/api/admin/server-info" target="_blank">运行信息 JSON</a></p>
   </section>
   <section>
     <h2>创建用户</h2>
@@ -1145,6 +1222,12 @@ def api_admin_jobs(
 def api_admin_stats(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     auth.require_admin(user)
     return db.admin_stats()
+
+
+@app.get("/api/admin/server-info")
+def api_admin_server_info(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
+    auth.require_admin(user)
+    return admin_server_info()
 
 
 @app.delete("/api/admin/jobs/{job_id}")

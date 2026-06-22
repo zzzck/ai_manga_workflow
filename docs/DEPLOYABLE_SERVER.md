@@ -84,6 +84,7 @@ data/server/ai_manga.sqlite3-shm
 - 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs`、`GET /api/jobs/{job_id}`、`POST /api/jobs/{job_id}/cancel`，由数据库记录任务归属、状态、日志路径和额度结算结果。
 - 管理任务和统计接口：`GET /api/admin/jobs` 支持按用户、状态和任务类型筛选，`DELETE /api/admin/jobs/{job_id}` 可删除 failed/canceled 任务记录，`GET /api/admin/stats` 返回用户、额度、任务状态、失败率、按模型聚合的用量和用量摘要。
 - 管理用户接口：`PATCH /api/admin/users/{user_id}` 可修改角色、状态、显示名和月额度，`POST /api/admin/users/{user_id}/quota/add` 可手动增加额度。
+- 管理运行信息：后台 `/admin` 会显示数据库路径、项目/输出目录、模型配置摘要、健康检查入口和备份命令；`GET /api/admin/server-info` 返回同样的 JSON 摘要，不包含密钥原文。
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
 - 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file` 等均要求登录。
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
@@ -230,6 +231,7 @@ deploy/nginx/ai_manga_workflow.conf
 - 服务重启后，普通生成任务的历史状态、日志路径和额度流水仍可从数据库查询。
 - 普通用户可以通过 `POST /api/jobs/{job_id}/cancel` 终止当前进程内正在运行的普通生成任务。
 - 管理员可以通过 `/admin` 查看统计概览、最近任务、最近用量，也可以通过 `/api/admin/stats` 查看统计 JSON。
+- 管理员可以在 `/admin` 的“运行状态”区块查看数据库、数据目录、模型配置摘要、健康检查和备份命令，也可以通过 `/api/admin/server-info` 读取 JSON。
 - AI 剧本工坊成功会把预扣额度转为已用；失败或终止会退回预扣额度，并把终态同步到数据库任务表。
 - `/api/state` 会合并返回内存和数据库里的 AI 剧本工坊任务；成功任务可通过保存的项目 YAML 恢复结果数据。
 - 管理员可以修改用户角色、手动增加额度，并删除 failed/canceled 任务记录。
