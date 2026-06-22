@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
+import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from dotenv import load_dotenv
@@ -16,6 +17,11 @@ from . import auth, db
 
 
 app = FastAPI(title="AI Manga Workflow Server")
+
+ROOT = Path.cwd().resolve()
+GLOBAL_PROJECT_DIR = ROOT / "data" / "projects"
+USER_DATA_DIR = ROOT / "data" / "users"
+USER_OUTPUT_DIR = ROOT / "outputs" / "users"
 
 
 @app.on_event("startup")
@@ -61,6 +67,172 @@ def sync_legacy_job_status(payload: dict[str, Any]) -> None:
     db_status = status_map.get(legacy_status)
     if db_status:
         db.update_job_status(str(payload.get("id") or ""), db_status, error_message=str(payload.get("error") or ""))
+
+
+def is_admin(user: dict[str, Any]) -> bool:
+    return user["role"] in {"super_admin", "admin"}
+
+
+def user_project_dir(user: dict[str, Any]) -> Path:
+    return USER_DATA_DIR / str(user["id"]) / "projects"
+
+
+def user_config_dir(user: dict[str, Any]) -> Path:
+    return USER_DATA_DIR / str(user["id"]) / "configs"
+
+
+def user_output_dir(user: dict[str, Any]) -> Path:
+    return USER_OUTPUT_DIR / str(user["id"])
+
+
+def relative(path: Path) -> str:
+    return str(path.resolve().relative_to(ROOT))
+
+
+def ensure_user_workspace(user: dict[str, Any]) -> None:
+    project_dir = user_project_dir(user)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    if any(project_dir.glob("*.yaml")):
+        return
+    for source in [GLOBAL_PROJECT_DIR / "demo_story.yaml", GLOBAL_PROJECT_DIR / "ancient_short.yaml"]:
+        if source.exists():
+            target = project_dir / source.name
+            if not target.exists():
+                target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def list_user_projects(user: dict[str, Any]) -> list[str]:
+    if is_admin(user):
+        projects = legacy_web._list_projects()
+        for user_dir in sorted(USER_DATA_DIR.glob("*/projects")) if USER_DATA_DIR.exists() else []:
+            projects.extend(relative(path) for path in sorted(user_dir.glob("*.yaml")))
+        return sorted(dict.fromkeys(projects))
+    ensure_user_workspace(user)
+    return [relative(path) for path in sorted(user_project_dir(user).glob("*.yaml"))]
+
+
+def user_safe_project_path(user: dict[str, Any], rel_path: str, *, for_write: bool = False) -> str:
+    raw_name = Path(str(rel_path or "new_manga_project.yaml")).name
+    if not raw_name.endswith((".yaml", ".yml")):
+        raw_name = f"{raw_name}.yaml"
+    if is_admin(user) and not for_write:
+        path = (ROOT / rel_path).resolve()
+        if path == ROOT or ROOT not in path.parents:
+            raise ValueError("项目路径越界。")
+        return str(path.relative_to(ROOT))
+    project_dir = user_project_dir(user)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    return relative(project_dir / raw_name)
+
+
+def read_project_for_user(user: dict[str, Any], rel_path: str) -> dict[str, Any]:
+    safe_path = user_safe_project_path(user, rel_path, for_write=False)
+    path = (ROOT / safe_path).resolve()
+    if not path.exists():
+        raise ValueError(f"Project file does not exist: {safe_path}")
+    content = path.read_text(encoding="utf-8")
+    project = legacy_web._project_from_content(content)
+    return legacy_web._project_response(path, project, content)
+
+
+def save_project_for_user(user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    safe_path = user_safe_project_path(user, str(payload.get("path") or ""), for_write=True)
+    path = (ROOT / safe_path).resolve()
+    if isinstance(payload.get("data"), dict):
+        project = legacy_web.ProjectBrief.model_validate(payload["data"])
+        legacy_web._validate_unique_character_voices(project)
+        content = legacy_web._project_to_yaml(project)
+    else:
+        content = str(payload.get("content") or "")
+        if not content.strip():
+            raise ValueError("Project YAML content is empty.")
+        project = legacy_web._project_from_content(content)
+        legacy_web._validate_unique_character_voices(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    response = legacy_web._project_response(path, project, content)
+    response["projects"] = list_user_projects(user)
+    db.upsert_project(int(user["id"]), project.title or project.project_id, response["path"], output_dir=relative(user_output_dir(user)))
+    return response
+
+
+def prepare_user_stage_payload(user: dict[str, Any], payload: dict[str, Any], job_id_hint: str) -> dict[str, Any]:
+    next_payload = dict(payload)
+    next_payload["project"] = user_safe_project_path(user, str(payload.get("project") or ""), for_write=False)
+    source_config = (ROOT / str(payload.get("config") or "config/pipeline.siliconflow.yaml")).resolve()
+    if source_config == ROOT or ROOT not in source_config.parents or not source_config.exists():
+        raise ValueError(f"流程配置不存在或越界：{payload.get('config')}")
+    with source_config.open("r", encoding="utf-8") as file:
+        config_data = yaml.safe_load(file) or {}
+    if not isinstance(config_data, dict):
+        raise ValueError(f"流程配置格式错误：{source_config}")
+    config_data.setdefault("project", {})
+    config_data["project"]["output_dir"] = relative(user_output_dir(user))
+    config_dir = user_config_dir(user)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    runtime_config = config_dir / f"runtime_{job_id_hint}.yaml"
+    runtime_config.write_text(yaml.safe_dump(config_data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    next_payload["config"] = relative(runtime_config)
+    return next_payload
+
+
+def latest_outputs_for_user(user: dict[str, Any]) -> dict[str, str]:
+    if is_admin(user):
+        return legacy_web._latest_outputs()
+    output_root = user_output_dir(user)
+    if not output_root.exists():
+        return {}
+    run_dirs = [path for path in output_root.glob("*/episode_*") if path.is_dir()]
+    if not run_dirs:
+        return {}
+    run_dir = max(run_dirs, key=legacy_web._run_dir_mtime)
+    project_id = run_dir.parent.name
+    episode_text = run_dir.name.removeprefix("episode_")
+    candidates = {
+        "final_video": run_dir / "final" / f"{project_id}_episode_{episode_text}_sample.mp4",
+        "script": run_dir / "script.md",
+        "storyboard": run_dir / "storyboard.html",
+        "render_report": run_dir / "reports" / "render_report.json",
+        "stage_report": run_dir / "reports" / "stage_report.json",
+    }
+    outputs = {name: relative(path) for name, path in candidates.items() if path.exists()}
+    logs = sorted((run_dir / "logs").glob("render_*.log"), key=lambda item: item.stat().st_mtime, reverse=True) if (run_dir / "logs").exists() else []
+    if logs:
+        outputs["latest_log"] = relative(logs[0])
+    return outputs
+
+
+def user_can_access_file(user: dict[str, Any], file_path: Path) -> bool:
+    path = file_path.resolve()
+    if is_admin(user):
+        return path == ROOT or ROOT in path.parents
+    allowed_roots = [user_project_dir(user).resolve(), user_output_dir(user).resolve()]
+    return any(path == root or root in path.parents for root in allowed_roots)
+
+
+def require_can_manage_user(operator: dict[str, Any], target_user_id: int) -> dict[str, Any]:
+    auth.require_admin(operator)
+    target = db.get_user_by_id(target_user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在。")
+    if operator["role"] != "super_admin" and target["role"] == "super_admin":
+        raise HTTPException(status_code=403, detail="admin 不能修改 super_admin。")
+    return target
+
+
+def filter_jobs_for_user(user: dict[str, Any], jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if is_admin(user):
+        return jobs
+    allowed = db.user_job_ids(int(user["id"]))
+    return [job for job in jobs if str(job.get("id") or "") in allowed]
+
+
+def require_job_access(user: dict[str, Any], job_id: str) -> None:
+    if is_admin(user):
+        return
+    job = db.get_job(job_id)
+    if not job or int(job["user_id"]) != int(user["id"]):
+        raise HTTPException(status_code=403, detail="没有权限访问该任务。")
 
 
 def login_page(error: str = "") -> str:
@@ -123,10 +295,19 @@ def admin_page(user: dict[str, Any]) -> str:
     rows = []
     for item in db.list_users():
         available = (item.get("monthly_quota") or 0) - (item.get("used_quota") or 0) - (item.get("reserved_quota") or 0)
+        disabled_selected = "selected" if item["status"] == "disabled" else ""
+        active_selected = "selected" if item["status"] == "active" else ""
         rows.append(
             f"<tr><td>{item['id']}</td><td>{html.escape(item['username'])}</td><td>{html.escape(item['role'])}</td>"
             f"<td>{html.escape(item['status'])}</td><td>{item.get('monthly_quota') or 0}</td>"
-            f"<td>{item.get('used_quota') or 0}</td><td>{item.get('reserved_quota') or 0}</td><td>{available}</td></tr>"
+            f"<td>{item.get('used_quota') or 0}</td><td>{item.get('reserved_quota') or 0}</td><td>{available}</td>"
+            f"<td><form method='post' action='/admin/users/{item['id']}/quota' class='inline-form'>"
+            f"<input name='monthly_quota' type='number' value='{item.get('monthly_quota') or 0}'><button>改额度</button></form>"
+            f"<form method='post' action='/admin/users/{item['id']}/status' class='inline-form'>"
+            f"<select name='status'><option value='active' {active_selected}>active</option><option value='disabled' {disabled_selected}>disabled</option></select><button>改状态</button></form>"
+            f"<form method='post' action='/admin/users/{item['id']}/password' class='inline-form'>"
+            f"<input name='password' placeholder='新密码'><button>重置密码</button></form>"
+            f"<form method='post' action='/admin/users/{item['id']}/quota/reset' class='inline-form'><button>清零用量</button></form></td></tr>"
         )
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -142,6 +323,9 @@ def admin_page(user: dict[str, Any]) -> str:
     table {{ width:100%; border-collapse:collapse; font-size:13px; }}
     th, td {{ text-align:left; border-bottom:1px solid #e5e7eb; padding:8px; }}
     form {{ display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:10px; align-items:end; }}
+    .inline-form {{ display:flex; grid-template-columns:none; gap:6px; margin:0 0 6px; align-items:center; }}
+    .inline-form input, .inline-form select {{ width:120px; }}
+    .inline-form button {{ min-width:72px; padding:0 8px; }}
     label {{ display:block; color:#667085; font-size:12px; margin-bottom:5px; }}
     input, select {{ width:100%; height:34px; border:1px solid #d8dde6; border-radius:6px; padding:0 8px; box-sizing:border-box; }}
     button {{ height:34px; border:0; border-radius:6px; background:#2563eb; color:#fff; font-weight:700; cursor:pointer; }}
@@ -166,7 +350,7 @@ def admin_page(user: dict[str, Any]) -> str:
   <section>
     <h2>用户与额度</h2>
     <table>
-      <thead><tr><th>ID</th><th>账号</th><th>角色</th><th>状态</th><th>总额</th><th>已用</th><th>预扣</th><th>可用</th></tr></thead>
+      <thead><tr><th>ID</th><th>账号</th><th>角色</th><th>状态</th><th>总额</th><th>已用</th><th>预扣</th><th>可用</th><th>操作</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
   </section>
@@ -246,6 +430,45 @@ async def admin_create_user(request: Request, user: dict[str, Any] = Depends(aut
     return RedirectResponse("/admin", status_code=302)
 
 
+@app.post("/admin/users/{user_id}/quota")
+async def admin_update_quota(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    require_can_manage_user(user, user_id)
+    form = await form_data(request)
+    db.update_user(user_id, monthly_quota=int(form.get("monthly_quota") or 0))
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/users/{user_id}/status")
+async def admin_update_status(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    target = require_can_manage_user(user, user_id)
+    form = await form_data(request)
+    status_value = form.get("status", "active")
+    if status_value not in {"active", "disabled"}:
+        raise HTTPException(status_code=400, detail="状态无效。")
+    if int(target["id"]) == int(user["id"]) and status_value == "disabled":
+        raise HTTPException(status_code=400, detail="不能禁用当前登录账号。")
+    db.update_user(user_id, status=status_value)
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/users/{user_id}/password")
+async def admin_reset_password(user_id: int, request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    require_can_manage_user(user, user_id)
+    form = await form_data(request)
+    password = form.get("password", "")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少 6 位。")
+    db.update_user(user_id, password_hash=auth.hash_password(password))
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/users/{user_id}/quota/reset")
+def admin_reset_quota(user_id: int, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
+    require_can_manage_user(user, user_id)
+    db.reset_user_quota(user_id)
+    return RedirectResponse("/admin", status_code=302)
+
+
 @app.get("/api/auth/me")
 def api_me(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     return {key: user[key] for key in ["id", "username", "role", "status", "display_name", "created_at", "last_login_at"]}
@@ -281,15 +504,15 @@ def api_admin_jobs(user: dict[str, Any] = Depends(auth.current_user)) -> list[di
 
 @app.get("/api/state")
 def api_state(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    jobs = legacy_web._job_list()
+    jobs = filter_jobs_for_user(user, legacy_web._job_list())
     for item in jobs:
         sync_legacy_job_status(item)
     return {
-        "projects": legacy_web._list_projects(),
+        "projects": list_user_projects(user),
         "configs": legacy_web._list_configs(),
         "jobs": jobs,
-        "workshop_jobs": legacy_web._workshop_job_list(),
-        "outputs": legacy_web._latest_outputs(),
+        "workshop_jobs": filter_jobs_for_user(user, legacy_web._workshop_job_list()),
+        "outputs": latest_outputs_for_user(user),
         "deploy_user": api_me(user),
         "quota": db.quota_for_user(int(user["id"])),
     }
@@ -297,19 +520,17 @@ def api_state(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, An
 
 @app.get("/api/project")
 def api_project(path: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    del user
     try:
-        return legacy_web._read_project_file(path)
+        return read_project_for_user(user, path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/project")
 async def api_project_save(request: Request, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    del user
     payload = await request.json()
     try:
-        return legacy_web._save_project_file(payload)
+        return save_project_for_user(user, payload)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -349,6 +570,7 @@ async def api_script_workshop(request: Request, user: dict[str, Any] = Depends(a
     event_id = 0
     try:
         event_id = db.reserve_quota(int(user["id"]), units, "script_workshop")
+        payload["_projects_dir"] = relative(user_project_dir(user))
         job = legacy_web._start_workshop_job(payload)
         db.record_job(
             str(job["id"]),
@@ -382,13 +604,13 @@ async def api_script_file(file: UploadFile, user: dict[str, Any] = Depends(auth.
 
 @app.get("/api/script/workshop/jobs/{job_id}")
 def api_workshop_job(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    del user
+    require_job_access(user, job_id)
     return legacy_web._workshop_job_detail(job_id)
 
 
 @app.post("/api/script/workshop/jobs/{job_id}/cancel")
 def api_workshop_cancel(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    del user
+    require_job_access(user, job_id)
     try:
         return legacy_web._cancel_workshop_job(job_id)
     except Exception as exc:
@@ -404,6 +626,7 @@ async def api_jobs_start(request: Request, user: dict[str, Any] = Depends(auth.c
     event_id = 0
     try:
         event_id = db.reserve_quota(int(user["id"]), units, action_type=action)
+        payload = prepare_user_stage_payload(user, payload, job_id_hint=str(db.next_job_hint()))
         job = legacy_web._start_job(payload)
         db.record_job(
             job.id,
@@ -424,7 +647,7 @@ async def api_jobs_start(request: Request, user: dict[str, Any] = Depends(auth.c
 
 @app.get("/api/jobs/{job_id}")
 def api_job_detail(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    del user
+    require_job_access(user, job_id)
     payload = legacy_web._job_detail(job_id)
     sync_legacy_job_status(payload)
     return payload
@@ -432,11 +655,12 @@ def api_job_detail(job_id: str, user: dict[str, Any] = Depends(auth.current_user
 
 @app.get("/api/file")
 def api_file(path: str, user: dict[str, Any] = Depends(auth.current_user)) -> Response:
-    del user
     try:
         file_path = legacy_web._safe_path(path)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found.")
+    if not user_can_access_file(user, file_path):
+        raise HTTPException(status_code=403, detail="没有权限访问该文件。")
     return FileResponse(file_path)

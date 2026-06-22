@@ -2362,9 +2362,17 @@ def _run_workshop_job(job: WorkshopJob, payload: dict[str, Any]) -> None:
         result = _generate_script_workshop(payload, job=job)
         if job.cancel_requested:
             raise WorkshopCancelled("用户已请求终止，已停止后续保存。")
-        saved_path = _autosave_workshop_project(result, job.id, save_name=payload.get("save_name"))
+        saved_path = _autosave_workshop_project(
+            result,
+            job.id,
+            save_name=payload.get("save_name"),
+            projects_dir=payload.get("_projects_dir"),
+        )
         result["path"] = saved_path
-        result["projects"] = _list_projects()
+        if str(payload.get("_projects_dir") or "").strip():
+            result["projects"] = _relative_files(_safe_path(str(payload["_projects_dir"])), "*.yaml")
+        else:
+            result["projects"] = _list_projects()
         _write_web_api_log("script_workshop", payload, result=result)
         _update_workshop_job(
             job,
@@ -2466,21 +2474,30 @@ def _cancel_workshop_job(job_id: str) -> dict[str, Any]:
     return _workshop_job_detail(job_id)
 
 
-def _autosave_workshop_project(result: dict[str, Any], job_id: str, save_name: Any = None) -> str:
+def _autosave_workshop_project(
+    result: dict[str, Any],
+    job_id: str,
+    save_name: Any = None,
+    projects_dir: Any = None,
+) -> str:
     project = ProjectBrief.model_validate(result.get("data") or {})
     _validate_unique_character_voices(project)
     content = str(result.get("content") or "") or _project_to_yaml(project)
-    projects_dir = ROOT / "data" / "projects"
-    projects_dir.mkdir(parents=True, exist_ok=True)
+    if str(projects_dir or "").strip():
+        projects_path = _safe_path(str(projects_dir))
+        projects_path.mkdir(parents=True, exist_ok=True)
+    else:
+        projects_path = ROOT / "data" / "projects"
+        projects_path.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     if str(save_name or "").strip():
         base_name = _safe_project_file_stem(str(save_name), fallback=project.project_id or f"ai_workshop_{timestamp}")
     else:
         base_name = _safe_project_file_stem(f"ai_workshop_{project.project_id}_{timestamp}_{job_id[:6]}", fallback=f"ai_workshop_{timestamp}")
-    path = projects_dir / f"{base_name}.yaml"
+    path = projects_path / f"{base_name}.yaml"
     counter = 2
     while path.exists():
-        path = projects_dir / f"{base_name}_{counter}.yaml"
+        path = projects_path / f"{base_name}_{counter}.yaml"
         counter += 1
     path.write_text(content, encoding="utf-8")
     return str(path.relative_to(ROOT))

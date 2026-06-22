@@ -67,7 +67,7 @@ data/server/ai_manga.sqlite3-shm
 - 登录页：账号密码登录，登录成功后写入 HttpOnly Cookie。
 - 退出登录：清除会话 Cookie。
 - 默认超级管理员自动初始化。
-- 后台管理页 `/admin`：管理员可创建用户，并查看用户额度。
+- 后台管理页 `/admin`：管理员可创建用户、修改额度、禁用/启用账号、重置密码、清零已用额度，并查看用户额度。
 - SQLite 数据库：本地存储用户、额度、用量流水、任务记录和项目索引。
 - 额度接口：`GET /api/quota/me`。
 - 用量接口：`GET /api/usage/me`、`GET /api/admin/usage`。
@@ -75,6 +75,10 @@ data/server/ai_manga.sqlite3-shm
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
 - 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file` 等均要求登录。
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
+- 普通用户项目隔离：项目 YAML 保存到 `data/users/<user_id>/projects/`。
+- 普通用户输出隔离：生成任务使用用户专属运行时配置，输出到 `outputs/users/<user_id>/`。
+- 普通用户任务隔离：只能在任务列表和任务详情中看到自己的任务；管理员可以查看全部任务。
+- 普通用户文件隔离：`/api/file` 只允许访问自己的项目目录和输出目录；管理员可以访问项目根目录内文件。
 
 ## 当前本地数据库
 
@@ -162,11 +166,23 @@ WantedBy=multi-user.target
 
 这些是 `部署方案.md` 中还需要继续推进的部分：
 
-- 按用户隔离项目 YAML：`data/users/<user_id>/projects/`。
-- 按用户隔离输出：`outputs/users/<user_id>/...`。
-- 文件下载接口按 user_id 做严格路径授权。
 - 用数据库任务表完全替代旧版 `web.py` 的内存 `JOBS` / `WORKSHOP_JOBS`。
 - 任务失败时按实际执行情况自动退款。
-- 管理后台支持禁用/启用用户、重置密码、修改额度、查看失败率和模型统计。
+- 管理后台支持查看失败率、模型统计、按用户筛选任务和删除失败任务。
 - PostgreSQL 迁移和 Alembic 迁移脚本。
 
+## 本地验证清单
+
+当前本地已经验证：
+
+- `manga-flow serve --host 127.0.0.1 --port 8000` 可以启动服务。
+- 未登录访问 `/api/state` 返回 `401`。
+- 默认管理员可以登录 `/console` 和 `/admin`。
+- 管理员可以创建普通用户。
+- 管理员可以修改普通用户额度、清零用量、禁用/启用账号、重置密码。
+- 普通用户登录后只能看到自己的项目列表。
+- 普通用户项目会初始化到 `data/users/<user_id>/projects/`。
+- 普通用户无法通过 `/api/file` 下载全局 `data/projects/` 文件。
+- 普通用户可以下载自己的 `data/users/<user_id>/projects/` 文件。
+- 普通用户运行 `structure` 阶段时，输出目录为 `outputs/users/<user_id>/...`。
+- 普通用户运行 `structure` 阶段会扣除对应额度。

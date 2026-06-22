@@ -25,3 +25,4 @@ __pycache__/
 outputs/*
 !outputs/.gitkeep
 data/server/
+data/users/

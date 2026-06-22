@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +209,21 @@ def update_user(
     return user
 
 
+def reset_user_quota(user_id: int) -> None:
+    with connect() as conn:
+        ensure_quota(conn, user_id)
+        conn.execute(
+            """
+            UPDATE user_quotas
+            SET used_quota = 0,
+                reserved_quota = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        )
+
+
 def reserve_quota(user_id: int, units: int, action_type: str, job_id: str | None = None) -> int:
     if units <= 0:
         return 0
@@ -374,3 +390,68 @@ def list_jobs(user_id: int | None = None, limit: int = 50) -> list[dict[str, Any
                 (user_id, limit),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def get_job(job_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT jobs.*, users.username
+            FROM jobs
+            JOIN users ON users.id = jobs.user_id
+            WHERE jobs.id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        return row_to_dict(row)
+
+
+def user_job_ids(user_id: int) -> set[str]:
+    with connect() as conn:
+        rows = conn.execute("SELECT id FROM jobs WHERE user_id = ?", (user_id,)).fetchall()
+        return {str(row["id"]) for row in rows}
+
+
+def upsert_project(user_id: int, name: str, yaml_path: str, output_dir: str = "", visibility: str = "private") -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO projects (user_id, name, yaml_path, output_dir, visibility)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, yaml_path) DO UPDATE SET
+                name = excluded.name,
+                output_dir = excluded.output_dir,
+                visibility = excluded.visibility,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, name, yaml_path, output_dir, visibility),
+        )
+
+
+def list_projects(user_id: int | None = None) -> list[dict[str, Any]]:
+    with connect() as conn:
+        if user_id is None:
+            rows = conn.execute(
+                """
+                SELECT projects.*, users.username
+                FROM projects
+                JOIN users ON users.id = projects.user_id
+                ORDER BY projects.updated_at DESC
+                """
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT projects.*, users.username
+                FROM projects
+                JOIN users ON users.id = projects.user_id
+                WHERE projects.user_id = ?
+                ORDER BY projects.updated_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def next_job_hint() -> str:
+    return uuid.uuid4().hex[:12]
