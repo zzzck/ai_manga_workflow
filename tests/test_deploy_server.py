@@ -33,9 +33,13 @@ def load_server(tmp_path: Path, monkeypatch):
 
 
 def login_admin(client: TestClient) -> None:
+    login_user(client, "admin", "adminpass123")
+
+
+def login_user(client: TestClient, username: str, password: str) -> None:
     response = client.post(
         "/login",
-        data={"username": "admin", "password": "adminpass123"},
+        data={"username": username, "password": password},
         follow_redirects=False,
     )
     assert response.status_code in {302, 303}
@@ -138,6 +142,42 @@ def test_admin_server_info_does_not_leak_api_keys(tmp_path: Path, monkeypatch) -
         assert admin_page.status_code == 200
         assert "运行状态" in admin_page.text
         assert "sk-test-should-not-leak" not in admin_page.text
+
+
+def test_admin_quota_api_lists_and_updates_user_quotas(tmp_path: Path, monkeypatch) -> None:
+    app_mod, db = load_server(tmp_path, monkeypatch)
+    auth_mod = sys.modules["manga_flow.server.auth"]
+
+    with TestClient(app_mod.app) as client:
+        login_admin(client)
+        created = db.create_user(
+            "quota_user",
+            auth_mod.hash_password("quota-pass"),
+            role="user",
+            monthly_quota=300,
+        )
+        user_id = int(created["id"])
+
+        listed = client.get("/api/admin/quotas")
+        assert listed.status_code == 200, listed.text
+        quota_rows = {item["user_id"]: item for item in listed.json()}
+        assert quota_rows[user_id]["username"] == "quota_user"
+        assert quota_rows[user_id]["monthly_quota"] == 300
+        assert quota_rows[user_id]["available_quota"] == 300
+
+        updated = client.patch(f"/api/admin/quotas/{user_id}", json={"monthly_quota": 180})
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["monthly_quota"] == 180
+        assert updated.json()["available_quota"] == 180
+
+        rejected = client.patch(f"/api/admin/quotas/{user_id}", json={"monthly_quota": -1})
+        assert rejected.status_code == 400, rejected.text
+        assert "月额度不能小于 0" in rejected.text
+
+        client.post("/logout", follow_redirects=False)
+        login_user(client, "quota_user", "quota-pass")
+        forbidden = client.get("/api/admin/quotas")
+        assert forbidden.status_code == 403
 
 
 def test_backup_restore_requires_explicit_apply_and_force(tmp_path: Path, monkeypatch) -> None:

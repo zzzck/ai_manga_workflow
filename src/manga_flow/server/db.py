@@ -238,6 +238,36 @@ def quota_for_user(user_id: int) -> dict[str, Any]:
     return payload
 
 
+def list_quotas(user_id: int | None = None) -> list[dict[str, Any]]:
+    filters: list[str] = []
+    values: list[Any] = []
+    if user_id is not None:
+        filters.append("users.id = ?")
+        values.append(user_id)
+    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
+    with connect() as conn:
+        reset_due_monthly_quotas(conn)
+        rows = conn.execute(
+            f"""
+            SELECT users.id AS user_id, users.username, users.role, users.status,
+                   user_quotas.monthly_quota, user_quotas.used_quota, user_quotas.reserved_quota,
+                   user_quotas.reset_cycle, user_quotas.reset_at, user_quotas.updated_at
+            FROM users
+            LEFT JOIN user_quotas ON user_quotas.user_id = users.id
+            {where_sql}
+            ORDER BY users.id
+            """,
+            values,
+        ).fetchall()
+    payloads = [dict(row) for row in rows]
+    for item in payloads:
+        item["monthly_quota"] = int(item.get("monthly_quota") or 0)
+        item["used_quota"] = int(item.get("used_quota") or 0)
+        item["reserved_quota"] = int(item.get("reserved_quota") or 0)
+        item["available_quota"] = item["monthly_quota"] - item["used_quota"] - item["reserved_quota"]
+    return payloads
+
+
 def list_users() -> list[dict[str, Any]]:
     with connect() as conn:
         reset_due_monthly_quotas(conn)
@@ -329,6 +359,16 @@ def reset_user_quota(user_id: int) -> None:
             """,
             (current_quota_period(), user_id),
         )
+
+
+def set_user_quota(user_id: int, monthly_quota: int) -> dict[str, Any]:
+    if monthly_quota < 0:
+        raise ValueError("月额度不能小于 0。")
+    update_user(user_id, monthly_quota=monthly_quota)
+    quotas = list_quotas(user_id)
+    if not quotas:
+        raise ValueError(f"User does not exist: {user_id}")
+    return quotas[0]
 
 
 def add_user_quota(user_id: int, amount: int) -> dict[str, Any]:

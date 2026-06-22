@@ -1180,6 +1180,44 @@ def api_quota_me(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str,
     return db.quota_for_user(int(user["id"]))
 
 
+@app.get("/api/admin/quotas")
+def api_admin_quotas(
+    user_id: int | None = None,
+    user: dict[str, Any] = Depends(auth.current_user),
+) -> list[dict[str, Any]]:
+    auth.require_admin(user)
+    if user_id is not None:
+        require_can_manage_user(user, user_id)
+    return db.list_quotas(user_id)
+
+
+@app.patch("/api/admin/quotas/{user_id}")
+async def api_admin_update_quota_record(
+    user_id: int,
+    request: Request,
+    user: dict[str, Any] = Depends(auth.current_user),
+) -> dict[str, Any]:
+    require_can_manage_user(user, user_id)
+    payload = await request.json()
+    try:
+        if "monthly_quota" in payload:
+            result = db.set_user_quota(user_id, int(payload["monthly_quota"]))
+        else:
+            quotas = db.list_quotas(user_id)
+            if not quotas:
+                raise ValueError(f"User does not exist: {user_id}")
+            result = quotas[0]
+        if payload.get("reset_used") or payload.get("reset"):
+            db.reset_user_quota(user_id)
+            quotas = db.list_quotas(user_id)
+            if not quotas:
+                raise ValueError(f"User does not exist: {user_id}")
+            result = quotas[0]
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/provider-status")
 def api_provider_status(
     config: str = "config/pipeline.siliconflow.yaml",

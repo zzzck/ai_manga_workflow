@@ -86,6 +86,7 @@ data/server/ai_manga.sqlite3-shm
 - 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs`、`GET /api/jobs/{job_id}`、`POST /api/jobs/{job_id}/cancel`，由数据库记录任务归属、状态、日志路径和额度结算结果。
 - 管理任务和统计接口：`GET /api/admin/jobs` 支持按用户、状态和任务类型筛选，`DELETE /api/admin/jobs/{job_id}` 可删除 failed/canceled 任务记录，`GET /api/admin/stats` 返回用户、额度、任务状态、失败率、按模型聚合的用量和用量摘要。
 - 管理用户接口：`PATCH /api/admin/users/{user_id}` 可修改角色、状态、显示名和月额度，`POST /api/admin/users/{user_id}/quota/add` 可手动增加额度。
+- 管理额度接口：`GET /api/admin/quotas` 可查看全部用户额度，也可用 `user_id` 筛选；`PATCH /api/admin/quotas/{user_id}` 可设置 `monthly_quota`，并可传 `reset_used=true` 清零已用和预扣额度。
 - 管理运行信息：后台 `/admin` 会显示数据库路径、项目/输出目录、模型配置摘要、健康检查入口和备份命令；`GET /api/admin/server-info` 返回同样的 JSON 摘要，不包含密钥原文。
 - 部署自检命令：`manga-flow deploy-check --config config/pipeline.siliconflow.yaml --env-file .env` 会检查 `.env`、默认密码风险、SQLite 路径、数据目录可写性和模型环境变量，不会调用外部模型接口。
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
