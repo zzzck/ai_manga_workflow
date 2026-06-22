@@ -141,6 +141,12 @@ deploy/nginx/ai_manga_workflow.conf
 curl http://127.0.0.1:8000/healthz
 ```
 
+登录后可以检查模型槽位和 `.env` 是否配置完整：
+
+```text
+http://127.0.0.1:8000/api/provider-status
+```
+
 ## 网页端操作流程
 
 ### 1. 从主页选择入口

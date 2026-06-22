@@ -79,6 +79,7 @@ data/server/ai_manga.sqlite3-shm
 - 额度接口：`GET /api/quota/me`。
 - 用量接口：`GET /api/usage/me`、`GET /api/admin/usage`。
 - 健康检查：`GET /healthz`，用于 Nginx、systemd 或部署脚本确认服务进程可访问。
+- 模型配置检查：`GET /api/provider-status`，读取流程配置和 `.env`，返回各模型槽是否启用、模型名、端点以及所需环境变量是否已配置；不会调用外部模型接口，也不会返回密钥原文。
 - 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs`、`GET /api/jobs/{job_id}`、`POST /api/jobs/{job_id}/cancel`，由数据库记录任务归属、状态、日志路径和额度结算结果。
 - 管理任务和统计接口：`GET /api/admin/jobs` 支持按用户、状态和任务类型筛选，`DELETE /api/admin/jobs/{job_id}` 可删除 failed/canceled 任务记录，`GET /api/admin/stats` 返回用户、额度、任务状态、失败率和用量摘要。
 - 管理用户接口：`PATCH /api/admin/users/{user_id}` 可修改角色、状态、显示名和月额度，`POST /api/admin/users/{user_id}/quota/add` 可手动增加额度。
@@ -201,6 +202,7 @@ deploy/nginx/ai_manga_workflow.conf
 
 - `manga-flow serve --host 127.0.0.1 --port 8000` 可以启动服务。
 - `/healthz` 返回 `{"status":"ok"}`。
+- `/api/provider-status` 登录后可查看模型槽位和必需环境变量是否配置。
 - 未登录访问 `/api/state` 返回 `401`。
 - 默认管理员可以登录 `/console` 和 `/admin`。
 - 管理员可以创建普通用户。

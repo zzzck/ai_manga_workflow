@@ -12,8 +12,9 @@ from urllib.parse import parse_qs
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
+from manga_flow.config import load_config
 from manga_flow import web as legacy_web
 
 from . import auth, db
@@ -69,6 +70,70 @@ def quota_units(action: str, stages: str = "") -> int:
     if "compose" in parts:
         cost += 5
     return cost
+
+
+def env_value(name: str, env_values: dict[str, str | None]) -> str:
+    return os.getenv(name, "") or str(env_values.get(name) or "")
+
+
+def provider_required_envs(provider: Any) -> list[str]:
+    names: list[str] = []
+    if provider.api_key_env:
+        names.append(str(provider.api_key_env))
+    if provider.provider == "tencentcloud":
+        for key in ["secret_id_env", "secret_key_env"]:
+            value = provider.extra.get(key)
+            if isinstance(value, str) and value:
+                names.append(value)
+        if provider.extra.get("include_app_id", False):
+            value = provider.extra.get("app_id_env")
+            if isinstance(value, str) and value:
+                names.append(value)
+    return sorted(dict.fromkeys(names))
+
+
+def provider_status_payload(config_path: str, env_file: str) -> dict[str, Any]:
+    config_rel = str(config_path or "config/pipeline.siliconflow.yaml")
+    env_rel = str(env_file or ".env")
+    config_file = legacy_web._safe_path(config_rel)
+    env_path = legacy_web._safe_path(env_rel)
+    pipeline_config = load_config(config_file)
+    env_values = dotenv_values(env_path) if env_path.exists() else {}
+    slots = []
+    missing_required = []
+    for name, provider in pipeline_config.providers.items():
+        model_env = provider.extra.get("model_env")
+        model_from_env = env_value(model_env, env_values) if isinstance(model_env, str) and model_env else ""
+        required_envs = provider_required_envs(provider)
+        env_states = [
+            {"name": env_name, "set": bool(env_value(env_name, env_values))}
+            for env_name in required_envs
+        ]
+        missing = [item["name"] for item in env_states if not item["set"]]
+        if provider.enabled:
+            missing_required.extend(missing)
+        slots.append(
+            {
+                "slot": name,
+                "enabled": provider.enabled,
+                "provider": provider.provider or "",
+                "model": model_from_env or provider.model or "",
+                "model_env": model_env if isinstance(model_env, str) else "",
+                "endpoint": provider.endpoint or "",
+                "base_url": provider.base_url or "",
+                "required_envs": env_states,
+                "missing_required_envs": missing if provider.enabled else [],
+                "notes": provider.notes or "",
+            }
+        )
+    return {
+        "config": str(config_file.relative_to(ROOT)),
+        "env_file": str(env_path.relative_to(ROOT)) if env_path.exists() else env_rel,
+        "env_file_exists": env_path.exists(),
+        "ok": not missing_required,
+        "missing_required_envs": sorted(dict.fromkeys(missing_required)),
+        "slots": slots,
+    }
 
 
 def public_job_status(status_value: str) -> str:
@@ -612,7 +677,7 @@ def admin_page(user: dict[str, Any]) -> str:
       <thead><tr><th>ID</th><th>用户</th><th>类型</th><th>状态</th><th>预扣</th><th>实际</th><th>创建时间</th><th>操作</th></tr></thead>
       <tbody>{''.join(job_rows)}</tbody>
     </table>
-    <p><a href="/api/admin/jobs" target="_blank">查看任务 JSON</a> · <a href="/api/admin/stats" target="_blank">查看统计 JSON</a></p>
+    <p><a href="/api/admin/jobs" target="_blank">查看任务 JSON</a> · <a href="/api/admin/stats" target="_blank">查看统计 JSON</a> · <a href="/api/provider-status" target="_blank">查看模型配置状态</a></p>
   </section>
   <section>
     <h2>最近用量</h2>
@@ -783,6 +848,19 @@ async def api_change_password(request: Request, user: dict[str, Any] = Depends(a
 @app.get("/api/quota/me")
 def api_quota_me(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     return db.quota_for_user(int(user["id"]))
+
+
+@app.get("/api/provider-status")
+def api_provider_status(
+    config: str = "config/pipeline.siliconflow.yaml",
+    env_file: str = ".env",
+    user: dict[str, Any] = Depends(auth.current_user),
+) -> dict[str, Any]:
+    del user
+    try:
+        return provider_status_payload(config, env_file)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/usage/me")
