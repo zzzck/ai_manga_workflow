@@ -235,6 +235,67 @@ def db_jobs_for_user(user: dict[str, Any]) -> list[dict[str, Any]]:
     return [db_job_payload(row) for row in rows]
 
 
+def workshop_result_from_project_path(project_path: str) -> dict[str, Any] | None:
+    if not project_path:
+        return None
+    try:
+        path = (ROOT / project_path).resolve()
+        if path == ROOT or ROOT not in path.parents or not path.exists():
+            return None
+        content = path.read_text(encoding="utf-8")
+        project = legacy_web._project_from_content(content)
+        return legacy_web._project_response(path, project, content)
+    except Exception:
+        return None
+
+
+def workshop_db_list_item(job: dict[str, Any]) -> dict[str, Any]:
+    payload = db_job_payload(job, include_log=False)
+    log_path_text = str(job.get("log_path") or "")
+    output_path = str(job.get("output_path") or "")
+    payload.update(
+        {
+            "id": job.get("id"),
+            "label": "AI 剧本工坊",
+            "current_stage": "",
+            "current_stage_name": "",
+            "artifacts": [],
+            "project_path": output_path,
+            "source": "database",
+            "model": "",
+            "warning": "",
+            "cancel_requested": False,
+            "has_result": bool(workshop_result_from_project_path(output_path)),
+        }
+    )
+    if log_path_text:
+        log_path = Path(log_path_text)
+        try:
+            payload["log_path"] = str(log_path.relative_to(ROOT))
+            payload["log_dir"] = str(log_path.parent.relative_to(ROOT))
+        except ValueError:
+            payload["log_path"] = str(log_path)
+            payload["log_dir"] = str(log_path.parent)
+    return payload
+
+
+def workshop_jobs_for_user(user: dict[str, Any]) -> list[dict[str, Any]]:
+    memory_jobs = filter_jobs_for_user(user, legacy_web._workshop_job_list())
+    merged: list[dict[str, Any]] = list(memory_jobs)
+    seen = {str(job.get("id") or "") for job in memory_jobs}
+    rows = db.list_jobs(
+        None if is_admin(user) else int(user["id"]),
+        job_type="script_workshop",
+        limit=50,
+    )
+    for row in rows:
+        job_id = str(row.get("id") or "")
+        if job_id and job_id not in seen:
+            merged.append(workshop_db_list_item(row))
+            seen.add(job_id)
+    return merged[:50]
+
+
 def workshop_db_fallback(job_id: str) -> dict[str, Any]:
     job = db.get_job(job_id)
     if not job:
@@ -249,8 +310,11 @@ def workshop_db_fallback(job_id: str) -> dict[str, Any]:
         except ValueError:
             payload["log_dir"] = str(log_path.parent)
     payload.setdefault("artifacts", [])
-    payload.setdefault("result", None)
     payload.setdefault("project_path", job.get("output_path") or "")
+    result = workshop_result_from_project_path(str(payload.get("project_path") or ""))
+    payload["result"] = result
+    if result and not payload.get("project_path"):
+        payload["project_path"] = result.get("path") or ""
     return payload
 
 
@@ -1101,7 +1165,7 @@ def api_state(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, An
         "projects": list_user_projects(user),
         "configs": legacy_web._list_configs(),
         "jobs": db_jobs_for_user(user),
-        "workshop_jobs": filter_jobs_for_user(user, legacy_web._workshop_job_list()),
+        "workshop_jobs": workshop_jobs_for_user(user),
         "outputs": latest_outputs_for_user(user),
         "deploy_user": api_me(user),
         "quota": db.quota_for_user(int(user["id"])),
