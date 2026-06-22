@@ -127,6 +127,20 @@ http://127.0.0.1:8000
 docs/DEPLOYABLE_SERVER.md
 ```
 
+仓库也提供了可复制到 Linux 服务器的部署模板：
+
+```text
+deploy/README.md
+deploy/systemd/ai-manga.service
+deploy/nginx/ai_manga_workflow.conf
+```
+
+服务启动后可以用健康检查确认 FastAPI 正常：
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
 ## 网页端操作流程
 
 ### 1. 从主页选择入口

@@ -35,6 +35,12 @@ manga-flow serve --host 127.0.0.1 --port 8000
 http://127.0.0.1:8000
 ```
 
+健康检查：
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
 ## 默认账号
 
 首次启动时，如果数据库里没有用户，系统会自动创建超级管理员：
@@ -71,6 +77,7 @@ data/server/ai_manga.sqlite3-shm
 - SQLite 数据库：本地存储用户、额度、用量流水、任务记录和项目索引。
 - 额度接口：`GET /api/quota/me`。
 - 用量接口：`GET /api/usage/me`、`GET /api/admin/usage`。
+- 健康检查：`GET /healthz`，用于 Nginx、systemd 或部署脚本确认服务进程可访问。
 - 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs`、`GET /api/jobs/{job_id}`、`POST /api/jobs/{job_id}/cancel`，由数据库记录任务归属、状态、日志路径和额度结算结果。
 - 管理任务和统计接口：`GET /api/admin/jobs` 支持按用户、状态和任务类型筛选，`GET /api/admin/stats` 返回用户、额度、任务状态、失败率和用量摘要。
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
@@ -169,6 +176,14 @@ User=www-data
 WantedBy=multi-user.target
 ```
 
+仓库中已经提供可直接复制和按路径调整的模板：
+
+```text
+deploy/README.md
+deploy/systemd/ai-manga.service
+deploy/nginx/ai_manga_workflow.conf
+```
+
 ## 尚未完成的服务器化改造
 
 这些是 `部署方案.md` 中还需要继续推进的部分：
@@ -183,6 +198,7 @@ WantedBy=multi-user.target
 当前本地已经验证：
 
 - `manga-flow serve --host 127.0.0.1 --port 8000` 可以启动服务。
+- `/healthz` 返回 `{"status":"ok"}`。
 - 未登录访问 `/api/state` 返回 `401`。
 - 默认管理员可以登录 `/console` 和 `/admin`。
 - 管理员可以创建普通用户。

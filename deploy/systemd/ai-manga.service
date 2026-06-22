@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Manga Workflow Web Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ai_manga_workflow
+EnvironmentFile=/opt/ai_manga_workflow/.env
+ExecStart=/opt/ai_manga_workflow/.venv/bin/uvicorn manga_flow.server.app:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
