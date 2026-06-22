@@ -207,7 +207,7 @@ INDEX_HTML = r"""<!doctype html>
     <button onclick="refreshState()">刷新</button>
   </header>
   <nav class="page-tabs">
-    <button id="tab-home" class="active" onclick="showPage('home')">入口</button>
+    <button id="tab-home" class="active" onclick="showPage('home')">主页</button>
     <button id="tab-workshop" onclick="showPage('workshop')">AI 生成剧本</button>
     <button id="tab-editor" onclick="showPage('editor')">导入与编辑</button>
     <button id="tab-production" onclick="showPage('production')">生成控制</button>
