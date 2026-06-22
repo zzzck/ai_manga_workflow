@@ -251,8 +251,13 @@ def db_job_payload(job: dict[str, Any], include_log: bool = False) -> dict[str, 
         "error": job.get("error_message") or "",
     }
     if include_log:
-        log_path = Path(str(job.get("log_path") or ""))
-        payload["log"] = log_path.read_text(encoding="utf-8", errors="replace")[-40000:] if log_path.exists() else ""
+        log_path_text = str(job.get("log_path") or "")
+        log_path = Path(log_path_text) if log_path_text else None
+        payload["log"] = (
+            log_path.read_text(encoding="utf-8", errors="replace")[-40000:]
+            if log_path and log_path.is_file()
+            else ""
+        )
     return payload
 
 

@@ -239,6 +239,31 @@ def test_json_auth_and_admin_user_lifecycle_api(tmp_path: Path, monkeypatch) -> 
         assert client.get("/api/auth/me").status_code == 401
 
 
+def test_admin_can_cancel_other_users_db_job(tmp_path: Path, monkeypatch) -> None:
+    app_mod, db = load_server(tmp_path, monkeypatch)
+    auth_mod = sys.modules["manga_flow.server.auth"]
+
+    with TestClient(app_mod.app) as client:
+        login_admin(client)
+        created = db.create_user(
+            "job_owner",
+            auth_mod.hash_password("job-pass"),
+            role="user",
+            monthly_quota=300,
+        )
+        db.record_job("other_user_job", int(created["id"]), "stage", payload_json="{}", reserved_units=5)
+
+        canceled = client.post("/api/jobs/other_user_job/cancel")
+        assert canceled.status_code == 200, canceled.text
+        assert canceled.json()["status"] == "canceled"
+        assert canceled.json()["user_id"] == int(created["id"])
+
+        client.post("/logout", follow_redirects=False)
+        login_user(client, "job_owner", "job-pass")
+        forbidden = client.post("/api/jobs/missing_admin_job/cancel")
+        assert forbidden.status_code == 403
+
+
 def auth_mod_cookie_name() -> str:
     return sys.modules["manga_flow.server.auth"].COOKIE_NAME
 
