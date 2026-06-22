@@ -101,6 +101,32 @@ def init_db() -> None:
             );
             """
         )
+        conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'failed',
+                error_message = '服务启动时发现任务仍处于运行态，已标记为失败；请重新运行。',
+                finished_at = CURRENT_TIMESTAMP
+            WHERE status IN ('queued', 'running')
+            """
+        )
+        conn.execute(
+            """
+            UPDATE user_quotas
+            SET reserved_quota = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE reserved_quota > 0
+            """
+        )
+        conn.execute(
+            """
+            UPDATE usage_events
+            SET status = 'refunded',
+                actual_units = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'reserved'
+            """
+        )
 
 
 def get_user_by_username(username: str) -> dict[str, Any] | None:
@@ -318,6 +344,42 @@ def record_job(
             VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)
             """,
             (job_id, user_id, job_type, project_id, payload_json, log_path, reserved_units),
+        )
+
+
+def mark_job_running(job_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'running',
+                started_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (job_id,),
+        )
+
+
+def finish_job(
+    job_id: str,
+    status: str,
+    *,
+    actual_units: int = 0,
+    error_message: str = "",
+    output_path: str = "",
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET status = ?,
+                actual_units = ?,
+                error_message = ?,
+                output_path = COALESCE(NULLIF(?, ''), output_path),
+                finished_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, actual_units, error_message, output_path, job_id),
         )
 
 

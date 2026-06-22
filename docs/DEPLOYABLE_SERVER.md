@@ -71,10 +71,11 @@ data/server/ai_manga.sqlite3-shm
 - SQLite 数据库：本地存储用户、额度、用量流水、任务记录和项目索引。
 - 额度接口：`GET /api/quota/me`。
 - 用量接口：`GET /api/usage/me`、`GET /api/admin/usage`。
-- 任务接口：`POST /api/jobs`、`GET /api/jobs/{job_id}`，并记录任务归属用户。
+- 普通生成任务接口：`POST /api/jobs`、`GET /api/jobs/{job_id}`，由数据库记录任务归属、状态、日志路径和额度结算结果。
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
 - 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file` 等均要求登录。
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
+- 普通生成任务结算：`/api/jobs` 创建任务时进入 `reserved_quota`，命令真正成功后转入 `used_quota`，命令失败后退回额度并记录失败日志。
 - 普通用户项目隔离：项目 YAML 保存到 `data/users/<user_id>/projects/`。
 - 普通用户输出隔离：生成任务使用用户专属运行时配置，输出到 `outputs/users/<user_id>/`。
 - 普通用户任务隔离：只能在任务列表和任务详情中看到自己的任务；管理员可以查看全部任务。
@@ -112,7 +113,7 @@ AI_MANGA_DB_PATH=/opt/ai_manga_workflow/data/server/ai_manga.sqlite3
 | 合成成片 | 5 |
 | 一键完整出片 | 220 |
 
-当前实现是在任务创建前预扣或检查额度，任务成功接受后记为已用。后续需要进一步细化为“任务真正成功后再从 reserved 转 used，失败自动退款”，并把旧内存任务执行器完全迁移到数据库任务执行器。
+当前普通生成任务 `/api/jobs` 已按“创建时预扣、命令成功后转已用、命令失败后退回”的方式结算。AI 剧本工坊和规范化导入仍复用旧本地控制台逻辑，其中规范化导入是同步接口，AI 剧本工坊仍需要继续迁移到数据库任务执行器，才能做到生成中断、服务重启后的完整状态恢复和失败自动退款。
 
 ## 与旧本地控制台的关系
 
@@ -166,8 +167,8 @@ WantedBy=multi-user.target
 
 这些是 `部署方案.md` 中还需要继续推进的部分：
 
-- 用数据库任务表完全替代旧版 `web.py` 的内存 `JOBS` / `WORKSHOP_JOBS`。
-- 任务失败时按实际执行情况自动退款。
+- 用数据库任务表完全替代旧版 `web.py` 的 `WORKSHOP_JOBS`，让 AI 剧本工坊也支持重启后状态恢复。
+- AI 剧本工坊失败时按实际执行情况自动退款。
 - 管理后台支持查看失败率、模型统计、按用户筛选任务和删除失败任务。
 - PostgreSQL 迁移和 Alembic 迁移脚本。
 
@@ -185,4 +186,6 @@ WantedBy=multi-user.target
 - 普通用户无法通过 `/api/file` 下载全局 `data/projects/` 文件。
 - 普通用户可以下载自己的 `data/users/<user_id>/projects/` 文件。
 - 普通用户运行 `structure` 阶段时，输出目录为 `outputs/users/<user_id>/...`。
-- 普通用户运行 `structure` 阶段会扣除对应额度。
+- 普通用户运行 `structure` 阶段会先预扣对应额度，成功后转为已用。
+- 普通用户运行失败的普通生成任务会自动退回预扣额度，并在 `/api/jobs/{job_id}` 返回失败日志。
+- 服务重启后，普通生成任务的历史状态、日志路径和额度流水仍可从数据库查询。

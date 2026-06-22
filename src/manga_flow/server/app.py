@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from pathlib import Path
+import subprocess
+import threading
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -61,12 +64,118 @@ def quota_units(action: str, stages: str = "") -> int:
     return cost
 
 
-def sync_legacy_job_status(payload: dict[str, Any]) -> None:
-    legacy_status = str(payload.get("status") or "")
-    status_map = {"done": "success", "failed": "failed", "running": "running", "queued": "queued"}
-    db_status = status_map.get(legacy_status)
-    if db_status:
-        db.update_job_status(str(payload.get("id") or ""), db_status, error_message=str(payload.get("error") or ""))
+def public_job_status(status_value: str) -> str:
+    return {
+        "success": "done",
+        "failed": "failed",
+        "canceled": "failed",
+        "running": "running",
+        "queued": "queued",
+    }.get(status_value, status_value)
+
+
+def job_label(job: dict[str, Any]) -> str:
+    try:
+        payload = json.loads(job.get("input_payload_json") or "{}")
+    except Exception:
+        payload = {}
+    job_type = str(job.get("job_type") or payload.get("action") or "")
+    if job_type == "check":
+        return "检查项目"
+    if job_type == "provider_status":
+        return "接口状态"
+    if job_type == "stage":
+        return f"运行流程：{payload.get('stages') or 'all'}"
+    if job_type == "script_workshop":
+        return "AI 剧本工坊"
+    return job_type or "任务"
+
+
+def db_job_payload(job: dict[str, Any], include_log: bool = False) -> dict[str, Any]:
+    payload = {
+        **job,
+        "action": job.get("job_type"),
+        "label": job_label(job),
+        "status": public_job_status(str(job.get("status") or "")),
+        "return_code": 0 if job.get("status") == "success" else (1 if job.get("status") in {"failed", "canceled"} else None),
+        "error": job.get("error_message") or "",
+    }
+    if include_log:
+        log_path = Path(str(job.get("log_path") or ""))
+        payload["log"] = log_path.read_text(encoding="utf-8", errors="replace")[-40000:] if log_path.exists() else ""
+    return payload
+
+
+def db_jobs_for_user(user: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = db.list_jobs(None if is_admin(user) else int(user["id"]), limit=50)
+    return [db_job_payload(row) for row in rows]
+
+
+def start_db_job(user: dict[str, Any], payload: dict[str, Any], units: int) -> dict[str, Any]:
+    job_id = db.next_job_hint()
+    prepared = prepare_user_stage_payload(user, payload, job_id_hint=job_id)
+    label, command = legacy_web._build_command(prepared)
+    log_dir = user_output_dir(user) / "web_jobs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{job_id}.log"
+    event_id = 0
+    try:
+        event_id = db.reserve_quota(int(user["id"]), units, action_type=str(payload.get("action") or "stage"), job_id=job_id)
+        db.record_job(
+            job_id,
+            int(user["id"]),
+            str(payload.get("action") or "stage"),
+            project_id=str(prepared.get("project") or ""),
+            payload_json=json.dumps({**prepared, "label": label}, ensure_ascii=False),
+            log_path=str(log_path),
+            reserved_units=units,
+        )
+        thread = threading.Thread(target=run_db_job, args=(job_id, command, log_path, event_id, units), daemon=True)
+        thread.start()
+    except Exception:
+        if event_id:
+            db.finish_usage_event(event_id, "refunded")
+        raise
+    job = db.get_job(job_id)
+    assert job is not None
+    return db_job_payload(job)
+
+
+def run_db_job(job_id: str, command: list[str], log_path: Path, event_id: int, units: int) -> None:
+    db.mark_job_running(job_id)
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    return_code = 1
+    error_message = ""
+    try:
+        with log_path.open("w", encoding="utf-8") as log:
+            log.write("$ " + " ".join(command) + "\n\n")
+            log.flush()
+            process = subprocess.Popen(
+                command,
+                cwd=ROOT,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            assert process.stdout is not None
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+            return_code = process.wait()
+    except Exception as exc:
+        error_message = repr(exc)
+        with log_path.open("a", encoding="utf-8") as log:
+            log.write(f"\nERROR: {error_message}\n")
+    if return_code == 0:
+        db.finish_usage_event(event_id, "success", actual_units=units)
+        db.finish_job(job_id, "success", actual_units=units)
+    else:
+        db.finish_usage_event(event_id, "refunded")
+        db.finish_job(job_id, "failed", actual_units=0, error_message=error_message or f"return_code={return_code}")
 
 
 def is_admin(user: dict[str, Any]) -> bool:
@@ -504,13 +613,10 @@ def api_admin_jobs(user: dict[str, Any] = Depends(auth.current_user)) -> list[di
 
 @app.get("/api/state")
 def api_state(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
-    jobs = filter_jobs_for_user(user, legacy_web._job_list())
-    for item in jobs:
-        sync_legacy_job_status(item)
     return {
         "projects": list_user_projects(user),
         "configs": legacy_web._list_configs(),
-        "jobs": jobs,
+        "jobs": db_jobs_for_user(user),
         "workshop_jobs": filter_jobs_for_user(user, legacy_web._workshop_job_list()),
         "outputs": latest_outputs_for_user(user),
         "deploy_user": api_me(user),
@@ -623,34 +729,19 @@ async def api_jobs_start(request: Request, user: dict[str, Any] = Depends(auth.c
     action = str(payload.get("action") or "stage")
     stages = str(payload.get("stages") or "")
     units = quota_units(action, stages)
-    event_id = 0
     try:
-        event_id = db.reserve_quota(int(user["id"]), units, action_type=action)
-        payload = prepare_user_stage_payload(user, payload, job_id_hint=str(db.next_job_hint()))
-        job = legacy_web._start_job(payload)
-        db.record_job(
-            job.id,
-            int(user["id"]),
-            action,
-            project_id=str(payload.get("project") or ""),
-            payload_json=json.dumps(payload, ensure_ascii=False),
-            log_path=job.log_path,
-            reserved_units=units,
-        )
-        db.finish_usage_event(event_id, "success")
-        return legacy_web.asdict(job)
+        return start_db_job(user, payload, units)
     except Exception as exc:
-        if event_id:
-            db.finish_usage_event(event_id, "refunded")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/jobs/{job_id}")
 def api_job_detail(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     require_job_access(user, job_id)
-    payload = legacy_web._job_detail(job_id)
-    sync_legacy_job_status(payload)
-    return payload
+    job = db.get_job(job_id)
+    if not job:
+        return {"id": job_id, "status": "missing", "log": ""}
+    return db_job_payload(job, include_log=True)
 
 
 @app.get("/api/file")
