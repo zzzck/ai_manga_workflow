@@ -327,6 +327,14 @@ manga-flow init-project urban_rebirth_001 "重生后我只想搞钱"
 manga-flow provider-status --config config/pipeline.siliconflow.yaml
 ```
 
+备份可部署版服务数据：
+
+```bash
+manga-flow backup-server --output backups
+```
+
+默认会打包 SQLite 快照、`data/users`、`data/projects` 和 `outputs`，不会包含 `.env`。如果确实要把 `.env` 一起放进备份包，需要显式加 `--include-env`，并妥善保存备份文件。
+
 启动本地网页控制台：
 
 ```bash

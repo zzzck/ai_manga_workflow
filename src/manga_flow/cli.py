@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
 import os
 from pathlib import Path
+import sqlite3
+import zipfile
 
 import typer
 from dotenv import load_dotenv
@@ -15,6 +18,45 @@ from .render import render_sample, run_render_stages
 
 app = typer.Typer(no_args_is_help=True, help="AI 漫剧自动化工作流 CLI。")
 console = Console()
+
+
+def _zip_path(zip_file: zipfile.ZipFile, source: Path, arcname: Path, exclude: set[Path] | None = None) -> int:
+    exclude = {item.resolve() for item in (exclude or set())}
+    if not source.exists():
+        return 0
+    if source.is_file():
+        if source.resolve() in exclude or source.name in {".DS_Store"}:
+            return 0
+        zip_file.write(source, arcname.as_posix())
+        return 1
+    count = 0
+    for item in sorted(source.rglob("*")):
+        if (
+            not item.is_file()
+            or item.resolve() in exclude
+            or item.name in {".DS_Store"}
+            or "__pycache__" in item.parts
+        ):
+            continue
+        zip_file.write(item, (arcname / item.relative_to(source)).as_posix())
+        count += 1
+    return count
+
+
+def _backup_sqlite_database(source: Path, target: Path) -> bool:
+    if not source.exists():
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source_conn = sqlite3.connect(str(source))
+    try:
+        target_conn = sqlite3.connect(str(target))
+        try:
+            source_conn.backup(target_conn)
+        finally:
+            target_conn.close()
+    finally:
+        source_conn.close()
+    return True
 
 
 @app.command("check")
@@ -190,6 +232,50 @@ def serve_command(
     import uvicorn
 
     uvicorn.run("manga_flow.server.app:app", host=host, port=port, reload=False)
+
+
+@app.command("backup-server")
+def backup_server_command(
+    output: Path = typer.Option(Path("backups"), "--output", "-o", help="备份 zip 文件路径，或备份目录。"),
+    include_outputs: bool = typer.Option(True, "--include-outputs/--no-outputs", help="是否打包 outputs 产物目录。"),
+    include_env: bool = typer.Option(False, "--include-env", help="是否把 .env 放进备份包。默认不包含，避免泄露密钥。"),
+) -> None:
+    """Create a deployable-server data backup zip without exposing secrets by default."""
+    from .server import db
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = output
+    if backup_path.suffix.lower() != ".zip":
+        backup_path.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_path / f"ai_manga_backup_{timestamp}.zip"
+    else:
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+
+    db_path = db.database_path()
+    tmp_db_snapshot = backup_path.parent / f".{backup_path.stem}_sqlite_snapshot.tmp"
+    excluded_paths = {backup_path, tmp_db_snapshot}
+    file_count = 0
+    try:
+        with zipfile.ZipFile(backup_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+            if _backup_sqlite_database(db_path, tmp_db_snapshot):
+                file_count += _zip_path(zip_file, tmp_db_snapshot, Path("data/server/ai_manga.sqlite3"))
+            for source_text, archive_text in [
+                ("data/users", "data/users"),
+                ("data/projects", "data/projects"),
+            ]:
+                file_count += _zip_path(zip_file, Path(source_text), Path(archive_text), exclude=excluded_paths)
+            if include_outputs:
+                file_count += _zip_path(zip_file, Path("outputs"), Path("outputs"), exclude=excluded_paths)
+            if include_env:
+                file_count += _zip_path(zip_file, Path(".env"), Path(".env"), exclude=excluded_paths)
+    finally:
+        tmp_db_snapshot.unlink(missing_ok=True)
+
+    console.print(f"[bold green]Backup created[/bold green]: {backup_path}")
+    console.print(f"Files archived: {file_count}")
+    console.print(f"SQLite source: {db_path if db_path.exists() else 'not found'}")
+    if not include_env:
+        console.print("[yellow]Note:[/yellow] .env was not included. Keep model keys and admin secrets backed up separately.")
 
 
 @app.command("init-project")

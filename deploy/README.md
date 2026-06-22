@@ -106,8 +106,12 @@ sudo journalctl -u ai-manga -f
 sudo systemctl restart ai-manga
 ```
 
-备份 SQLite 和产物：
+备份 SQLite、项目和产物：
 
 ```bash
-tar -czf ai_manga_backup_$(date +%F).tgz data/server outputs data/users
+cd /opt/ai_manga_workflow
+. .venv/bin/activate
+manga-flow backup-server --output backups
 ```
+
+备份命令会用 SQLite backup API 生成一致性数据库快照，并打包 `data/users`、`data/projects` 和 `outputs`。默认不包含 `.env`，避免把模型密钥和管理员配置放进备份包；如果确实需要连同 `.env` 备份，使用 `--include-env` 并限制备份文件访问权限。

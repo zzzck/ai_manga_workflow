@@ -112,6 +112,14 @@ AI_MANGA_DB_PATH=/opt/ai_manga_workflow/data/server/ai_manga.sqlite3
 
 服务器多人试用初期可以继续使用 SQLite。并发用户变多后，建议按 `部署方案.md` 迁移到 PostgreSQL。
 
+可以用内置命令备份当前 SQLite 快照、用户项目、全局项目和产物：
+
+```bash
+manga-flow backup-server --output backups
+```
+
+默认不包含 `.env`，避免把模型密钥和管理员密码配置放进备份包。确实需要同时备份 `.env` 时，使用 `--include-env` 并限制备份文件访问权限。
+
 ## 额度规则
 
 第一版采用内部点数，不按真实模型成本精算：
