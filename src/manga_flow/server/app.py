@@ -113,6 +113,53 @@ def db_jobs_for_user(user: dict[str, Any]) -> list[dict[str, Any]]:
     return [db_job_payload(row) for row in rows]
 
 
+def workshop_db_fallback(job_id: str) -> dict[str, Any]:
+    job = db.get_job(job_id)
+    if not job:
+        return {"id": job_id, "status": "missing", "log": ""}
+    payload = db_job_payload(job, include_log=True)
+    log_path_text = str(job.get("log_path") or "")
+    if log_path_text:
+        log_path = Path(log_path_text)
+        try:
+            payload["log_path"] = str(log_path.relative_to(ROOT))
+            payload["log_dir"] = str(log_path.parent.relative_to(ROOT))
+        except ValueError:
+            payload["log_dir"] = str(log_path.parent)
+    payload.setdefault("artifacts", [])
+    payload.setdefault("result", None)
+    payload.setdefault("project_path", job.get("output_path") or "")
+    return payload
+
+
+def sync_workshop_job_to_db(job_id: str, event_id: int, units: int) -> None:
+    terminal_status = {"done": "success", "failed": "failed", "canceled": "canceled"}
+    while True:
+        detail = legacy_web._workshop_job_detail(job_id)
+        status_value = str(detail.get("status") or "")
+        if status_value == "missing":
+            db.update_job_status(job_id, "failed", error_message="AI 剧本工坊任务已从内存中丢失。")
+            db.finish_usage_event(event_id, "refunded")
+            db.finish_job(job_id, "failed", actual_units=0, error_message="AI 剧本工坊任务已从内存中丢失。")
+            return
+        if status_value == "running":
+            db.mark_job_running(job_id)
+        elif status_value == "queued":
+            db.update_job_status(job_id, "queued")
+        elif status_value in terminal_status:
+            db_status = terminal_status[status_value]
+            output_path = str(detail.get("project_path") or "")
+            error_message = str(detail.get("error") or detail.get("warning") or "")
+            if db_status == "success":
+                db.finish_usage_event(event_id, "success", actual_units=units)
+                db.finish_job(job_id, "success", actual_units=units, error_message=error_message, output_path=output_path)
+            else:
+                db.finish_usage_event(event_id, "refunded")
+                db.finish_job(job_id, db_status, actual_units=0, error_message=error_message, output_path=output_path)
+            return
+        threading.Event().wait(1.0)
+
+
 def cancel_db_job(job_id: str) -> dict[str, Any]:
     job = db.get_job(job_id)
     if not job:
@@ -758,23 +805,31 @@ async def api_script_workshop(request: Request, user: dict[str, Any] = Depends(a
     payload = await request.json()
     units = quota_units("script_workshop")
     event_id = 0
+    job_id = db.next_job_hint()
     try:
-        event_id = db.reserve_quota(int(user["id"]), units, "script_workshop")
+        event_id = db.reserve_quota(int(user["id"]), units, "script_workshop", job_id=job_id)
         payload["_projects_dir"] = relative(user_project_dir(user))
-        job = legacy_web._start_workshop_job(payload)
+        payload["_job_id"] = job_id
+        timestamp = legacy_web.time.strftime("%Y%m%d_%H%M%S")
+        log_dir = user_output_dir(user) / "web_api" / f"script_workshop_{timestamp}_{job_id}"
+        payload["_log_dir"] = relative(log_dir)
         db.record_job(
-            str(job["id"]),
+            job_id,
             int(user["id"]),
             "script_workshop",
             payload_json=json.dumps(payload, ensure_ascii=False),
-            log_path=str(job.get("log_path") or ""),
+            log_path=relative(log_dir / "generation.log"),
             reserved_units=units,
         )
-        db.finish_usage_event(event_id, "success")
+        job = legacy_web._start_workshop_job(payload)
+        thread = threading.Thread(target=sync_workshop_job_to_db, args=(job_id, event_id, units), daemon=True)
+        thread.start()
         return job
     except Exception as exc:
         if event_id:
             db.finish_usage_event(event_id, "refunded")
+            if db.get_job(job_id):
+                db.finish_job(job_id, "failed", actual_units=0, error_message=str(exc))
         log_path = legacy_web._write_web_api_log("script_workshop", payload, error=exc)
         raise HTTPException(status_code=400, detail=f"{exc}；日志：{log_path}") from exc
 
@@ -795,7 +850,10 @@ async def api_script_file(file: UploadFile, user: dict[str, Any] = Depends(auth.
 @app.get("/api/script/workshop/jobs/{job_id}")
 def api_workshop_job(job_id: str, user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     require_job_access(user, job_id)
-    return legacy_web._workshop_job_detail(job_id)
+    detail = legacy_web._workshop_job_detail(job_id)
+    if detail.get("status") != "missing":
+        return detail
+    return workshop_db_fallback(job_id)
 
 
 @app.post("/api/script/workshop/jobs/{job_id}/cancel")
@@ -804,6 +862,9 @@ def api_workshop_cancel(job_id: str, user: dict[str, Any] = Depends(auth.current
     try:
         return legacy_web._cancel_workshop_job(job_id)
     except Exception as exc:
+        fallback = workshop_db_fallback(job_id)
+        if fallback.get("status") != "missing":
+            return fallback
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

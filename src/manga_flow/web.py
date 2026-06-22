@@ -2356,9 +2356,12 @@ def _start_workshop_job(payload: dict[str, Any]) -> dict[str, Any]:
     theme = str(payload.get("theme") or "").strip()
     if not theme:
         raise ValueError("Theme is required.")
-    job_id = uuid.uuid4().hex[:12]
+    job_id = str(payload.get("_job_id") or "").strip() or uuid.uuid4().hex[:12]
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    log_dir = ROOT / "outputs" / "web_api" / f"script_workshop_{timestamp}_{job_id}"
+    if str(payload.get("_log_dir") or "").strip():
+        log_dir = _safe_path(str(payload["_log_dir"]))
+    else:
+        log_dir = ROOT / "outputs" / "web_api" / f"script_workshop_{timestamp}_{job_id}"
     log_dir.mkdir(parents=True, exist_ok=True)
     job = WorkshopJob(
         id=job_id,
