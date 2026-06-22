@@ -1,0 +1,227 @@
+project:
+  default_episode: 1
+  output_dir: outputs
+
+defaults:
+  language: zh-CN
+  format: vertical_dynamic_comic
+  aspect_ratio: "9:16"
+  target_duration_sec: 75
+  shot_duration_sec: 5
+  production_mode: static_motion
+  subtitle_style: mobile_drama
+
+providers:
+  llm:
+    enabled: true
+    provider: siliconflow
+    model: Pro/zai-org/GLM-5.1
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /chat/completions
+    notes: "主编剧模型：选题、世界观、角色、分集大纲、单集剧本、分镜 JSON。GLM-5.2 高峰期易超时，当前切到同系 Pro/zai-org/GLM-5.1。"
+    extra:
+      model_env: SILICONFLOW_LLM_STORY_MODEL
+      temperature: 0.75
+      top_p: 0.9
+      max_tokens: 8192
+      response_format:
+        type: json_object
+
+  llm_fast:
+    enabled: true
+    provider: siliconflow
+    model: Pro/zai-org/GLM-5.1
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /chat/completions
+    notes: "文本轻任务模型：提示词补全、标题简介、格式修复、低成本质检。当前使用同系 Pro/zai-org/GLM-5.1，避开 GLM-5.2 高峰拥堵。"
+    extra:
+      model_env: SILICONFLOW_LLM_FAST_MODEL
+      temperature: 0.45
+      top_p: 0.8
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+  llm_vision:
+    enabled: true
+    provider: siliconflow
+    model: zai-org/GLM-4.5V
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /chat/completions
+    notes: "视觉质检模型：检查分镜图是否符合镜头、角色是否变脸、服装/道具是否一致。GLM-5.2 当前作为文本模型配置，视觉优先用 GLM-4.5V。"
+    extra:
+      model_env: SILICONFLOW_LLM_VISION_MODEL
+      temperature: 0.2
+      max_tokens: 2048
+      image_detail: high
+
+  embedding:
+    enabled: true
+    provider: siliconflow
+    model: Qwen/Qwen3-Embedding-8B
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /embeddings
+    notes: "IP 设定库、角色设定库、历史剧情检索。"
+    extra:
+      model_env: SILICONFLOW_EMBEDDING_MODEL
+      dimensions: 1024
+      encoding_format: float
+
+  rerank:
+    enabled: true
+    provider: siliconflow
+    model: BAAI/bge-reranker-v2-m3
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /rerank
+    notes: "检索结果重排，用于从设定库里找最相关的历史设定和剧情事实。"
+    extra:
+      model_env: SILICONFLOW_RERANK_MODEL
+      top_n: 6
+      return_documents: true
+
+  image:
+    enabled: true
+    provider: siliconflow
+    model: Tongyi-MAI/Z-Image
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /images/generations
+    notes: "主生图模型：角色卡、背景、分镜图、封面。优先质量和提示词遵循。"
+    extra:
+      model_env: SILICONFLOW_IMAGE_MODEL
+      image_size: "720x1280"
+      batch_size: 1
+      num_inference_steps: 20
+      negative_prompt: "low quality, blurry, watermark, logo, extra fingers, bad hands, deformed face, duplicate character, text overlay"
+
+  image_fast:
+    enabled: true
+    provider: siliconflow
+    model: Tongyi-MAI/Z-Image-Turbo
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /images/generations
+    notes: "快速生图备选：草图、批量试分镜、低成本预览。"
+    extra:
+      model_env: SILICONFLOW_IMAGE_FAST_MODEL
+      image_size: "720x1280"
+      batch_size: 1
+      num_inference_steps: 8
+      negative_prompt: "low quality, blurry, watermark, logo, deformed face"
+
+  image_edit:
+    enabled: true
+    provider: siliconflow
+    model: Qwen/Qwen-Image-Edit
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /images/generations
+    notes: "图像编辑：局部修图、换表情、统一服装/道具、修正角色细节。已用 Qwen/Qwen-Image-Edit 实测通过；2509 版本本次返回平台错误。"
+    extra:
+      model_env: SILICONFLOW_IMAGE_EDIT_MODEL
+      negative_prompt: "low quality, blurry, watermark, logo, deformed face"
+
+  video:
+    enabled: true
+    provider: siliconflow
+    model: Wan-AI/Wan2.2-I2V-A14B
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /video/submit
+    notes: "主视频模型：图生视频。漫剧建议先出稳定分镜图，再用该模型做关键镜头动画。"
+    extra:
+      model_env: SILICONFLOW_VIDEO_I2V_MODEL
+      image_size: "720x1280"
+      negative_prompt: "low quality, blurry, distorted face, extra limbs, unstable character identity, watermark, logo"
+      poll_endpoint: /video/status
+      poll_interval_sec: 5
+      poll_timeout_sec: 600
+
+  video_t2v:
+    enabled: true
+    provider: siliconflow
+    model: Wan-AI/Wan2.2-T2V-A14B
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /video/submit
+    notes: "文生视频备选：适合不依赖角色一致性的氛围镜头、空镜、转场。"
+    extra:
+      model_env: SILICONFLOW_VIDEO_T2V_MODEL
+      image_size: "720x1280"
+      negative_prompt: "low quality, blurry, distorted face, unstable character identity, watermark, logo"
+      poll_endpoint: /video/status
+      poll_interval_sec: 5
+      poll_timeout_sec: 600
+
+  voice:
+    enabled: true
+    provider: tencentcloud
+    model: TextToVoice
+    api_key_env: TENCENTCLOUD_SECRET_KEY
+    base_url: https://tts.tencentcloudapi.com
+    endpoint: TextToVoice
+    notes: "腾讯云 TTS 配音：按角色映射 VoiceType，旁白和人物对白使用不同音色。当前账号大模型音色包已耗尽，标准版先用精品音色。"
+    extra:
+      secret_id_env: TENCENTCLOUD_SECRET_ID
+      secret_key_env: TENCENTCLOUD_SECRET_KEY
+      app_id_env: TENCENTCLOUD_TTS_APP_ID
+      region_env: TENCENTCLOUD_TTS_REGION
+      version: "2019-08-23"
+      service: tts
+      codec: mp3
+      sample_rate: 16000
+      model_type: 1
+      primary_language: 1
+      project_id: 0
+      volume: 0
+      speed: 0
+      enable_subtitle: false
+      include_app_id: false
+      default_voice_type: 101013
+      voice_map:
+        旁白: 101013
+        沈照夜: 101001
+        谢凌舟: 101030
+      character_voice_map:
+        shen_zhaoye: 101001
+        xie_lingzhou: 101030
+      enable_emotion: false
+      emotion_intensity: 100
+      emotion_map:
+        惊疑: amaze
+        决绝: peaceful
+        压迫: fear
+        对峙: angry
+        悬念: story
+
+  stt:
+    enabled: true
+    provider: siliconflow
+    model: FunAudioLLM/SenseVoiceSmall
+    api_key_env: SILICONFLOW_API_KEY
+    base_url: https://api.siliconflow.cn/v1
+    endpoint: /audio/transcriptions
+    notes: "语音转文本：后续用于配音校对和自动字幕核验。"
+    extra:
+      model_env: SILICONFLOW_STT_MODEL
+
+  music:
+    enabled: false
+    provider: external_pending
+    model: ""
+    api_key_env: MUSIC_API_KEY
+    base_url: ""
+    endpoint: ""
+    notes: "硅基流动当前文档未提供独立 BGM/音效生成接口；先保留外部模型槽位。"
+    extra: {}
+
+quality_gates:
+  max_target_duration_drift_sec: 12
+  require_character_visual_locks: true
+  require_dialogue_or_audio_note: true
+  require_prompt_per_shot: true

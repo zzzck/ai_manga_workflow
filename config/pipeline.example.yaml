@@ -1,0 +1,50 @@
+project:
+  default_episode: 1
+  output_dir: outputs
+
+defaults:
+  language: zh-CN
+  format: vertical_dynamic_comic
+  aspect_ratio: "9:16"
+  target_duration_sec: 75
+  shot_duration_sec: 5
+  production_mode: static_motion
+  subtitle_style: mobile_drama
+
+providers:
+  llm:
+    enabled: false
+    provider: ""
+    model: ""
+    api_key_env: LLM_API_KEY
+    notes: "用于剧本、分镜、提示词扩写。先留空，选定模型后再接。"
+  image:
+    enabled: false
+    provider: ""
+    model: ""
+    api_key_env: IMAGE_API_KEY
+    notes: "用于角色卡、背景、分镜图、封面。"
+  video:
+    enabled: false
+    provider: ""
+    model: ""
+    api_key_env: VIDEO_API_KEY
+    notes: "用于关键镜头图生视频。普通镜头先走静态图加动效。"
+  voice:
+    enabled: false
+    provider: ""
+    model: ""
+    api_key_env: VOICE_API_KEY
+    notes: "用于旁白和角色配音。"
+  music:
+    enabled: false
+    provider: ""
+    model: ""
+    api_key_env: MUSIC_API_KEY
+    notes: "用于 BGM 和音效。"
+
+quality_gates:
+  max_target_duration_drift_sec: 12
+  require_character_visual_locks: true
+  require_dialogue_or_audio_note: true
+  require_prompt_per_shot: true

@@ -1,0 +1,78 @@
+project_id: demo_rebirth
+title: 重生后我只想搞钱
+genre: 都市逆袭
+format: vertical_dynamic_comic
+aspect_ratio: "9:16"
+target_duration_sec: 75
+audience: "18-35 岁短剧用户"
+logline: "破产女主重生回三年前，第一件事不是复仇，而是抢先买下即将暴涨的城中村铺面。"
+visual_style: "现代国漫，清晰五官，强情绪特写，竖屏短剧构图，高对比商业街夜景。"
+tone: "爽感强，节奏快，台词直接，结尾必须留钩子。"
+
+characters:
+  - id: lin_xia
+    name: 林夏
+    role: 女主
+    appearance: "25 岁，黑色长发，浅米色风衣，冷静锋利的眼神。"
+    personality: "理性、克制、行动快。"
+    voice_style: "年轻女性，中低音，语速偏快，情绪压得住。"
+    visual_lock:
+      - "黑色长发"
+      - "浅米色风衣"
+      - "左耳银色耳钉"
+  - id: zhou_yan
+    name: 周砚
+    role: 男主
+    appearance: "28 岁，深灰西装，短发，干净利落，气质冷淡。"
+    personality: "谨慎、观察力强、不轻易相信人。"
+    voice_style: "年轻男性，低音，冷静，停顿明显。"
+    visual_lock:
+      - "深灰西装"
+      - "短发"
+      - "黑色腕表"
+  - id: uncle_chen
+    name: 陈叔
+    role: 铺面业主
+    appearance: "50 岁，旧夹克，钥匙串不离手，表情犹豫。"
+    personality: "现实、怕麻烦，但心软。"
+    voice_style: "中年男性，略沙哑，说话慢。"
+    visual_lock:
+      - "旧夹克"
+      - "钥匙串"
+
+locations:
+  - id: old_street
+    name: 老街铺面
+    description: "即将拆迁改造的城中村商业街，霓虹招牌、窄巷、卷帘门。"
+    visual_lock:
+      - "霓虹招牌"
+      - "窄巷"
+      - "蓝色卷帘门"
+  - id: coffee_shop
+    name: 街角咖啡店
+    description: "能看到老街铺面的玻璃窗咖啡店，适合对峙和观察。"
+    visual_lock:
+      - "落地玻璃窗"
+      - "暖色吊灯"
+
+beats:
+  - id: hook
+    summary: "林夏从破产梦中惊醒，发现自己回到三年前。"
+    emotion: "震惊转冷静"
+    location_id: coffee_shop
+  - id: decision
+    summary: "她翻出记忆中的新闻时间线，决定先买下老街铺面。"
+    emotion: "果断"
+    location_id: coffee_shop
+  - id: conflict
+    summary: "陈叔临时反悔，周砚也突然出现要看同一间铺子。"
+    emotion: "紧张"
+    location_id: old_street
+  - id: reversal
+    summary: "林夏说出只有未来才会知道的改造细节，周砚开始怀疑她。"
+    emotion: "压迫"
+    location_id: old_street
+  - id: cliffhanger
+    summary: "合同刚签完，周砚低声问她：你到底从哪里知道这件事？"
+    emotion: "悬念"
+    location_id: old_street

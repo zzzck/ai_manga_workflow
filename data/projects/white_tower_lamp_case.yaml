@@ -1,0 +1,97 @@
+project_id: white_tower_lamp_case
+title: 借魂灯
+genre: 古风悬疑玄幻
+format: vertical_dynamic_comic
+aspect_ratio: '9:16'
+target_duration_sec: 60
+audience: 短剧用户
+logline: 女仵作在义庄发现映出死者记忆的灯，牵出三年前白塔狱冤案。
+visual_style: 中国古风国漫，冷色调雨夜，竖屏9:16，光影对比强。
+tone: 强钩子、快节奏、结尾留悬念。
+characters:
+- id: shen_qingluo
+  name: 沈青萝
+  role: 女仵作，暗查父亲冤死真相
+  appearance: 素衣束发，腰间挂验尸工具袋
+  personality: 冷静果敢，心思缜密
+  voice_style: 清冷沉稳，语速偏慢
+  visual_lock:
+  - 左眼角有颗小痣
+  - 常戴黑色皮手套
+  - 腰间铜铃验尸袋
+- id: pei_yuan
+  name: 裴渊
+  role: 神秘来客，自称旧案幸存者
+  appearance: 玄色斗笠蓑衣，面有刀疤
+  personality: 亦正亦邪，话少藏锋
+  voice_style: 低沉沙哑，带压迫感
+  visual_lock:
+  - 右手缺小指
+  - 斗笠压至眉骨
+  - 脖颈有烙印字
+locations:
+- id: charity_morgue
+  name: 城郊义庄
+  description: 破旧木屋，停尸板横陈，雨漏不断
+  visual_lock:
+  - 门匾半裂写有义庄
+  - 屋角有破油灯
+  - 地面青石板有血痕
+- id: white_tower_ruins
+  name: 白塔狱废墟
+  description: 焦黑残墙，中央倒塌白塔，锁链遍地
+  visual_lock:
+  - 白塔仅剩三层骨架
+  - 墙上有焦黑囚号
+  - 地面散落断裂枷锁
+beats:
+- id: beat_01
+  summary: 雨夜义庄，沈青萝验尸时发现异灯
+  emotion: 紧张悬疑
+  location_id: charity_morgue
+  characters:
+  - shen_qingluo
+  dialogue_first: 旁白：古雨夜，义庄第七具无名尸。
+  dialogue_second: 沈青萝：这灯……不是陪葬品。
+  action_first: 沈青萝掀白布验尸，雨声雷声交加
+  action_second: 死者手中紧握一盏铜灯，灯芯自燃
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: beat_02
+  summary: 灯焰映出死者记忆，浮现白塔狱画面
+  emotion: 惊惧震撼
+  location_id: charity_morgue
+  characters:
+  - shen_qingluo
+  dialogue_first: 旁白：灯焰映出三年前的白塔狱。
+  dialogue_second: 沈青萝：那个人……是父亲！
+  action_first: 灯焰绿光投射墙壁，映出囚牢影像
+  action_second: 画面中囚犯被拖走，脸转向沈青萝
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: beat_03
+  summary: 裴渊现身，称灯是他的，反转揭示身份
+  emotion: 惊变反转
+  location_id: charity_morgue
+  characters:
+  - shen_qingluo
+  - pei_yuan
+  dialogue_first: 裴渊：那盏灯，该还我了。
+  dialogue_second: 裴渊：你父亲，是我同牢的狱友。
+  action_first: 裴渊推门而入，斗笠滴水
+  action_second: 裴渊摘斗笠，露出脖颈烙印——囚号
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: beat_04
+  summary: 灯焰突变映出新记忆，指向真凶，留悬念
+  emotion: 震撼悬念
+  location_id: white_tower_ruins
+  characters:
+  - shen_qingluo
+  - pei_yuan
+  dialogue_first: 旁白：灯，还藏着第三段记忆。
+  dialogue_second: 裴渊：看到这张脸的人，都死了。
+  action_first: 灯焰转红，映出一个穿官服之人背影
+  action_second: 裴渊神色骤变，夺灯熄灭，黑暗中只剩一句话
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video

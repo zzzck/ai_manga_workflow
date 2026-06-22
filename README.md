@@ -1,0 +1,263 @@
+# AI 漫剧自动化工作流
+
+这是一个可扩展的 AI 漫剧生产流程。当前版本已经提供本地网页控制台，并接入硅基流动文本/图片/视频模型与腾讯云 TTS，可分步生成或一键生成漫剧样片：
+
+- 剧本与分镜脚本
+- 图片提示词和视频提示词
+- 角色、场景、镜头资产清单
+- 配音台词 JSON 和 SRT 字幕
+- 剪辑时间线 `edit_plan.json`
+- 自动质检报告和运行日志
+
+模型与接口配置集中在 `config/pipeline.siliconflow.yaml`，密钥从 `.env` 读取。
+
+## 快速开始
+
+```bash
+cd /Users/zzzck/Documents/yxy_html/ai_manga_workflow
+conda env create -f environment.yml
+conda activate ai-manga-flow
+manga-flow check
+manga-flow run
+```
+
+如果环境已存在：
+
+```bash
+cd /Users/zzzck/Documents/yxy_html/ai_manga_workflow
+conda env update -n ai-manga-flow -f environment.yml
+conda activate ai-manga-flow
+```
+
+默认示例项目在：
+
+```text
+data/projects/demo_story.yaml
+```
+
+默认配置在：
+
+```text
+config/pipeline.example.yaml
+```
+
+硅基流动专用配置在：
+
+```text
+config/pipeline.siliconflow.yaml
+```
+
+运行后输出在：
+
+```text
+outputs/demo_rebirth/episode_001/
+```
+
+## 启动网页端
+
+推荐使用网页端来编写剧本、选择角色音色、分阶段生成图片/配音/视频，并查看日志和产物。
+
+先进入项目目录并激活环境：
+
+```bash
+cd /Users/zzzck/Documents/yxy_html/ai_manga_workflow
+conda activate ai-manga-flow
+```
+
+启动本地网页服务：
+
+```bash
+manga-flow web --host 127.0.0.1 --port 8765
+```
+
+如果 `manga-flow` 命令不可用，也可以直接使用当前环境里的 Python：
+
+```bash
+/opt/homebrew/Caskroom/miniforge/base/envs/ai-manga-flow/bin/python -m manga_flow.cli web --host 127.0.0.1 --port 8765
+```
+
+然后在浏览器打开：
+
+```text
+http://127.0.0.1:8765
+```
+
+如果端口 `8765` 被占用，可以换一个端口，例如：
+
+```bash
+manga-flow web --host 127.0.0.1 --port 8766
+```
+
+对应打开：
+
+```text
+http://127.0.0.1:8766
+```
+
+不要关闭运行网页服务的终端窗口。浏览器刷新不会中断后台任务，但如果停止网页服务，页面无法继续查看任务状态。
+
+## 网页端操作流程
+
+### 1. 选择基础配置
+
+页面左侧先确认：
+
+- 项目 YAML：选择要生成的剧本文件，例如 `data/projects/bie_peng_ta.yaml`。
+- 流程配置：通常选择 `config/pipeline.siliconflow.yaml`。
+- Env 文件：通常保持 `.env`。
+- 视频超时秒数：默认 `900` 秒。
+- 视频镜头：通常保持 `auto`，表示读取剧本中 `production_mode: image_to_video` 的镜头并调用视频接口。
+
+### 2. 编写或导入剧本
+
+你可以用三种方式准备剧本：
+
+- AI 写大纲：输入主题、类型和目标时长，点击“AI 生成粗略大纲”。
+- 导入已有剧本：上传或粘贴剧本文本，填写类型和目标时长，点击“规范化导入剧本”。
+- 手动新建：点击“新建模板”，直接在结构化表单里填写角色、场景、分幕和镜头。
+
+导入或编辑完成后，务必点击：
+
+```text
+保存剧本
+```
+
+保存成功后，新剧本会进入左侧“项目 YAML”下拉框。
+
+### 3. 设置角色音色
+
+在“角色”区域为每个角色设置：
+
+- 角色性别：女、男或中性/童声。
+- 腾讯云音色：可以搜索音色编号、名称或场景。
+- 随机音色：按角色性别随机选择一个未被其他角色使用的音色。
+- 全部随机音色：一次性给所有角色分配不重复音色。
+
+同一个剧本中角色音色不能重复。如果重复，保存或检查项目时会报错。
+
+### 4. 分步生成
+
+第一次跑新剧本，建议按顺序分步执行，方便定位问题：
+
+1. 检查项目：校验剧本和模型配置，不调用生成接口。
+2. 脚本分镜：生成镜头列表、字幕、配音文本、图片提示词和视频提示词。
+3. 生成图片：调用图片模型生成每个镜头的分镜图。
+4. 生成配音：调用腾讯云 TTS，按角色音色生成语音。
+5. 生成视频：优先调用图生视频接口；失败的镜头会记录日志并回退静态分镜。
+6. 合成成片：把图片/视频、配音、字幕合成为最终样片。
+
+熟悉流程后，也可以直接点击：
+
+```text
+一键完整出片
+```
+
+它会按 `脚本分镜 -> 生成图片 -> 生成配音 -> 生成视频 -> 合成成片` 顺序自动运行。
+
+### 5. 查看日志和产物
+
+页面左侧“任务”区域会显示任务状态，右侧“任务日志”会实时显示当前任务输出。
+
+常用日志位置：
+
+```text
+outputs/web_jobs/                         # 网页按钮启动的后台任务日志
+outputs/web_api/                          # AI 写大纲、规范化导入剧本等网页接口日志
+outputs/<project_id>/episode_001/logs/    # 生成流程详细日志
+```
+
+常用产物位置：
+
+```text
+outputs/<project_id>/episode_001/
+```
+
+页面右侧“最新产物”会显示最终视频、脚本、故事板、渲染报告、阶段报告和最新日志链接。
+
+如果页面显示的任务状态没有及时更新，可以点页面右上角“刷新”或刷新浏览器页面。浏览器刷新不会中断已经开始的后台任务。
+
+## 当前目录结构
+
+```text
+ai_manga_workflow/
+  config/                  # 模型和流程配置
+  data/projects/           # 项目设定 YAML
+  docs/                    # 中文方案文档
+  outputs/                 # 运行产物
+  src/manga_flow/          # Python 工作流代码
+```
+
+## 常用命令
+
+检查配置和项目：
+
+```bash
+manga-flow check \
+  --config config/pipeline.example.yaml \
+  --project data/projects/demo_story.yaml
+```
+
+运行占位流程：
+
+```bash
+manga-flow run \
+  --config config/pipeline.example.yaml \
+  --project data/projects/demo_story.yaml \
+  --episode 1
+```
+
+生成可观看样片：
+
+```bash
+manga-flow render-sample \
+  --config config/pipeline.siliconflow.yaml \
+  --project data/projects/ancient_short.yaml \
+  --key-shots e001s002b,e001s005b
+```
+
+创建新项目模板：
+
+```bash
+manga-flow init-project urban_rebirth_001 "重生后我只想搞钱"
+```
+
+查看硅基流动模型槽位和 API Key 状态：
+
+```bash
+manga-flow provider-status --config config/pipeline.siliconflow.yaml
+```
+
+启动本地网页控制台：
+
+```bash
+manga-flow web --host 127.0.0.1 --port 8765
+```
+
+分阶段运行生成流程：
+
+```bash
+manga-flow stage \
+  --stages images,voice,videos,compose \
+  --config config/pipeline.siliconflow.yaml \
+  --project data/projects/ancient_short.yaml \
+  --key-shots auto
+```
+
+## 下一步
+
+1. 在 `data/projects/*.yaml` 固定角色、场景、视觉风格和剧情节拍。
+2. 在 `config/pipeline.siliconflow.yaml` 或 `config/pipeline.example.yaml` 选择模型供应商和模型名。
+3. 在 `src/manga_flow/providers/` 增加真实 provider，例如 `openai_image.py`、`runway_video.py`、`elevenlabs_voice.py`。
+4. 让 provider 写入真实图片、视频、音频文件，再由剪辑模块生成成片。
+
+硅基流动接入说明见：
+
+```text
+docs/SILICONFLOW_SETUP.md
+```
+
+更详细的网页控制台说明见：
+
+```text
+docs/WEB_CONSOLE.md
+```

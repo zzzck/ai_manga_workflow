@@ -1,0 +1,146 @@
+project_id: ancient_moon_lamp
+title: 月下借命灯
+genre: 古风悬疑玄幻
+format: vertical_dynamic_comic
+aspect_ratio: '9:16'
+target_duration_sec: 60
+audience: 喜欢古风、悬疑、强钩子短漫剧的用户
+logline: 雨夜义庄，女仵作沈照夜发现无名信使带着失踪兄长的玉扣和白塔狱火漆。她违禁点燃借命灯，却发现少年将军谢凌舟不是凶手，而是唯一知道她为何会成为下一盏灯芯的人。
+visual_style: 中国古风国漫，细腻线条，冷月色调，雨夜高反差，衣料纹理清晰，人物眼神强情绪，竖屏短剧构图。
+tone: 强钩子、快节奏、信息逐层翻转。前半段以验尸和禁术制造悬疑，中段用谢凌舟制造误导，结尾反转成沈照夜本人被盯上。台词短促，有古风质感但不堆辞藻。
+characters:
+- id: shen_zhaoye
+  name: 沈照夜
+  role: 女主，年轻女仵作
+  appearance: 20 岁，乌发半挽，青色窄袖长衫，腰间银针囊，眉眼清冷。
+  personality: 冷静、胆大、执念深。
+  voice_style: 年轻女性，中低音，克制，句尾干净。
+  visual_lock:
+  - 乌发半挽
+  - 青色窄袖长衫
+  - 腰间银针囊
+  - 竹簪
+- id: xie_lingzhou
+  name: 谢凌舟
+  role: 少年将军，奉旨密查旧案
+  appearance: 23 岁，玄色劲装，银色护腕，腰悬雁翎刀，眼神锋利。
+  personality: 警惕、果决、隐藏秘密。
+  voice_style: 年轻男性，低音，冷静，有压迫感。
+  visual_lock:
+  - 玄色劲装
+  - 银色护腕
+  - 雁翎刀
+- id: dead_messenger
+  name: 无名信使
+  role: 死者，推动谜案
+  appearance: 灰布夜行衣，衣襟有暗色雨痕，手中攥着旧玉扣和半片火漆。
+  personality: 无台词。
+  voice_style: ''
+  visual_lock:
+  - 灰布夜行衣
+  - 旧玉扣
+  - 半片火漆
+  - 暗色雨痕
+locations:
+- id: yizhuang
+  name: 雨夜义庄
+  description: 城外破旧义庄，木案、白灯笼、漏雨屋檐、冷雾贴地。
+  visual_lock:
+  - 白灯笼
+  - 木案
+  - 漏雨屋檐
+  - 冷雾
+- id: moon_bridge
+  name: 月下石桥
+  description: 义庄外的旧石桥，桥下黑水，远处有城楼剪影。
+  visual_lock:
+  - 旧石桥
+  - 黑水
+  - 城楼剪影
+- id: white_tower_prison
+  name: 白塔狱幻影
+  description: 借命灯火中浮现的禁狱幻象，白塔残墙、铁栏、符纸和冷蓝火光交叠。
+  visual_lock:
+  - 白塔残墙
+  - 铁栏
+  - 符纸
+  - 冷蓝火光
+beats:
+- id: hook
+  summary: 雨夜义庄里，无名信使明明断气，手指却在木案上敲出三声。
+  emotion: 惊疑
+  location_id: yizhuang
+  characters:
+  - shen_zhaoye
+  - dead_messenger
+  dialogue_first: 旁白：子时，义庄里多了一名不该进城的信使。
+  dialogue_second: 沈照夜：哥哥失踪三年，玉扣怎么会在你手里？
+  action_first: 白灯笼被风吹灭一盏，沈照夜验到一半，木案忽然响起三下。
+  action_second: 她掰开信使手指，旧玉扣滚到灯下，内侧刻着兄长的小字。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: hidden_clue
+  summary: 沈照夜从信使袖缝中挑出半片火漆，印纹指向三年前被抹去的白塔狱。
+  emotion: 追查
+  location_id: yizhuang
+  characters:
+  - shen_zhaoye
+  - dead_messenger
+  dialogue_first: 沈照夜：白塔狱……三年前不是已经烧没了吗？
+  dialogue_second: 旁白：可她要找的人，只剩这盏灯能问。
+  action_first: 她以银针挑开袖缝，半片火漆落在验尸盘中，火漆上残留白塔印纹。
+  action_second: 玉扣背面遇灯浮出一行极浅字迹：月满前，莫借命。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: forbidden_lamp
+  summary: 沈照夜违禁点燃借命灯，看见兄长被押上月桥，押送者戴着镇北军银护腕。
+  emotion: 决绝
+  location_id: yizhuang
+  characters:
+  - shen_zhaoye
+  dialogue_first: 沈照夜：若你借过我哥哥的命，就把债还回来。
+  dialogue_second: 旁白：借命灯一燃，死人最后一眼便会重现。
+  action_first: 她合上门闩，取出青铜借命灯，把旧玉扣压在灯心旁。
+  action_second: 蓝白火焰映出月下石桥幻影：兄长踉跄回头，身后银护腕扣住刀柄。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: false_suspect
+  summary: 谢凌舟破门夺灯，承认银护腕是他的，却否认自己是凶手。
+  emotion: 对峙
+  location_id: yizhuang
+  characters:
+  - shen_zhaoye
+  - xie_lingzhou
+  dialogue_first: 谢凌舟：再看下去，看到你的就不是死人了。
+  dialogue_second: 沈照夜：护腕是你的，刀也是你的，你还想抵赖？
+  action_first: 木门被风撞开，谢凌舟一刀挑灭半盏灯火，雨水顺着玄衣落下。
+  action_second: 沈照夜银针贴住他脉门，目光落在他腕上同样的银护腕。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: reversal
+  summary: 谢凌舟揭出真相：信使不是死在刀下，而是被人借空了命后送到沈照夜面前。
+  emotion: 反转
+  location_id: yizhuang
+  characters:
+  - shen_zhaoye
+  - xie_lingzhou
+  - dead_messenger
+  dialogue_first: 谢凌舟：他不是死在我刀下，是被人借空了命。
+  dialogue_second: 沈照夜：他们不是要杀我，是要等我点灯。
+  action_first: 谢凌舟掀开信使衣襟内侧，露出一枚倒扣的宫印和缺角密诏。
+  action_second: 密诏残页写着“沈氏女，灯成即取”，沈照夜的名字被朱砂圈住。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: cliffhanger
+  summary: 借命灯反噬复燃，白塔狱幻影中出现兄长身影，谢凌舟说沈照夜才是下一盏灯芯。
+  emotion: 悬念
+  location_id: white_tower_prison
+  characters:
+  - shen_zhaoye
+  - xie_lingzhou
+  dialogue_first: 谢凌舟：你哥哥没死，他在替你守第一盏灯。
+  dialogue_second: 旁白：这一夜，她查到的不是凶手，是下一盏灯芯的名字。
+  action_first: 灯芯忽然自己复燃，火光照出白塔狱深处，沈照夜兄长隔着铁栏抬眼。
+  action_second: 沈照夜低头，看见自己的影子被火焰钉在地上，影子额心浮出借命符。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video

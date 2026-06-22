@@ -1,0 +1,116 @@
+project_id: bie_peng_ta
+title: 别碰她
+genre: 校园爽剧
+format: vertical_dynamic_comic
+aspect_ratio: '9:16'
+target_duration_sec: 60
+audience: 短剧用户
+logline: 转校生沈砚挺身而出，用冷静与证据当众揭穿校董之子的霸凌行径并亮出观察员身份，为被欺凌的女生林晚讨回公道。
+visual_style: 现实校园短剧，电影感，高对比光影，冷色校园走廊，压迫感强，镜头节奏快，人物表情明显，情绪张力强，校园霸凌反转爽剧，高清写实风格，竖屏 9:16，角色一致，无文字，无水印。
+tone: 短剧节奏，强钩子，结尾留悬念。
+characters:
+- id: shen_yan
+  name: 沈砚
+  role: 主角
+  appearance: 180cm身高，身着校服，干净得体
+  personality: ''
+  gender: male
+  voice_style: 101054 智友 / 通用男声 / 精品音色 / 8k/16k
+  voice_type: 101054
+  visual_lock:
+  - 17岁冷感转校男生
+  - 白衬衫
+  - 黑色校服外套
+  - 身形修长
+  - 眼神冷静
+- id: lin_wan
+  name: 林晚
+  role: 配角
+  appearance: 身着校服，低马尾，青春洋溢
+  personality: ''
+  gender: female
+  voice_style: 101026 智希 / 通用女声 / 精品音色 / 8k/16k
+  voice_type: 101026
+  visual_lock:
+  - 17岁安静女学生
+  - 低马尾
+  - 校服干净但略旧
+  - 眼眶微红
+  - 神情隐忍
+- id: gu_ming_xuan
+  name: 顾明轩
+  role: 配角
+  appearance: 定制校服，领口敞开
+  personality: ''
+  gender: male
+  voice_style: 101030 智柯 / 通用男声 / 精品音色 / 8k/16k
+  voice_type: 101030
+  visual_lock:
+  - 18岁富家校霸
+  - 定制校服
+  - 名牌球鞋
+  - 昂贵手表
+  - 表情轻蔑
+locations:
+- id: school_hallway
+  name: 教学楼走廊
+  description: 待补充场景描述。
+  visual_lock:
+  - 冷色校园走廊
+  - 安静
+  - 电子公告屏
+  - 高对比光影
+beats:
+- id: beat_1
+  summary: 顾明轩将林晚书包倒扣在地，踩住她的笔记本羞辱。
+  emotion: 压抑
+  location_id: school_hallway
+  characters:
+  - lin_wan
+  - gu_ming_xuan
+  dialogue_first: 顾明轩：“林晚，我说过吧？你这种人，不配坐第一排。”
+  dialogue_second: 顾明轩：“求我，我就还你。” 林晚：“还给我。”
+  action_first: 教学楼走廊，林晚蹲在地上捡书，书包被人倒扣在地，课本散落一地。顾明轩靠在墙边冷笑，跟班拿手机拍摄起哄。
+  action_second: 林晚伸手去拿笔记本，顾明轩一脚踩住。林晚咬唇，低声要求归还，顾明轩俯身逼近。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: beat_2
+  summary: 沈砚出现夺回笔记本，并制服推搡他的顾明轩。
+  emotion: 对峙
+  location_id: school_hallway
+  characters:
+  - shen_yan
+  - gu_ming_xuan
+  dialogue_first: 沈砚：“她说，还给她。” 顾明轩：“你谁啊？” 沈砚：“新来的。”
+  dialogue_second: 沈砚：“别把欺负人，当成你的特权。”
+  action_first: 一只手伸进画面，抓住顾明轩鞋后跟把笔记本抽出。沈砚站在林晚身前，把笔记本递给她，走廊瞬间安静。
+  action_second: 顾明轩伸手推沈砚，沈砚侧身避开，反手扣住他手腕压在墙上。动作干净，顾明轩脸色大变。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: beat_3
+  summary: 顾明轩搬出家世威胁，沈砚将霸凌证据投屏公开。
+  emotion: 震惊
+  location_id: school_hallway
+  characters:
+  - shen_yan
+  - gu_ming_xuan
+  dialogue_first: 顾明轩：“你知道我爸是谁吗？这学校一栋楼都是我家捐的。” 沈砚：“知道。所以我才等你把话说完。”
+  dialogue_second: 周校长：“沈同学，这种事情不要扩大影响，我们去办公室谈。” 沈砚：“不用了。市教育局反校园霸凌专项调查，今天正式进校。我是学生观察员。”
+  action_first: 顾明轩咬牙搬出父亲身份威胁，沈砚松开他整理袖口。沈砚拿出手机，投屏到走廊电子公告屏，屏幕上出现顾明轩欺负同学的视频和截图，学生们围观议论。
+  action_second: 校长急匆匆赶来试图息事宁人，沈砚拿出一份文件，亮出真实身份。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
+- id: beat_4
+  summary: 沈砚揭穿校长纵容行径，顾明轩崩溃，林晚终于抬头。
+  emotion: 释然
+  location_id: school_hallway
+  characters:
+  - shen_yan
+  - lin_wan
+  - gu_ming_xuan
+  dialogue_first: 沈砚：“周校长，你纵容他的每一次，都在文件里。”
+  dialogue_second: 沈砚：“你以为没人敢管你，是因为他们怕你。不是因为你是对的。”
+  action_first: 校长脸色瞬间苍白。顾明轩后退一步，脸色惨白。林晚站在沈砚身后，第一次抬起头。
+  action_second: 沈砚看向顾明轩，留下最后通牒。顾明轩被带走，林晚紧紧抱着笔记本，眼眶发红。
+  production_mode_first: image_to_video
+  production_mode_second: image_to_video
