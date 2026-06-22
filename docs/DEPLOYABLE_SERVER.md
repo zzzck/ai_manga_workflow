@@ -88,6 +88,7 @@ data/server/ai_manga.sqlite3-shm
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
 - 普通生成任务结算：`/api/jobs` 创建任务时进入 `reserved_quota`，命令真正成功后转入 `used_quota`，命令失败后退回额度并记录失败日志。
 - AI 剧本工坊结算：`/api/script/workshop` 创建任务时进入 `reserved_quota`，后台工坊任务完成后同步到数据库；成功转入 `used_quota`，失败或终止退回额度。
+- 月度额度周期：`reset_cycle=monthly` 的账号会在进入新月份后自动把 `used_quota` 清零，并把 `reset_at` 更新为当前 `YYYY-MM`；运行中任务的 `reserved_quota` 不会被月度重置清掉。
 - 普通用户项目隔离：项目 YAML 保存到 `data/users/<user_id>/projects/`。
 - 普通用户输出隔离：生成任务使用用户专属运行时配置，输出到 `outputs/users/<user_id>/`。
 - 普通用户任务隔离：只能在任务列表和任务详情中看到自己的任务；管理员可以查看全部任务。
@@ -221,3 +222,4 @@ deploy/nginx/ai_manga_workflow.conf
 - 管理员可以修改用户角色、手动增加额度，并删除 failed/canceled 任务记录。
 - 登录用户可以通过 `POST /api/auth/change-password` 修改自己的密码。
 - 管理员可以在 `/admin` 和 `/api/admin/stats` 查看基于额度流水聚合的模型用量。
+- 月度额度自动重置会清零已用额度并保留运行中预扣额度，后台用户表会显示当前额度周期。

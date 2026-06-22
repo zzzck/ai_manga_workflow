@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime
 import uuid
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,25 @@ def connect() -> sqlite3.Connection:
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
+
+
+def current_quota_period() -> str:
+    return datetime.now().strftime("%Y-%m")
+
+
+def reset_due_monthly_quotas(conn: sqlite3.Connection) -> None:
+    period = current_quota_period()
+    conn.execute(
+        """
+        UPDATE user_quotas
+        SET used_quota = 0,
+            reset_at = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE reset_cycle = 'monthly'
+          AND COALESCE(reset_at, '') != ?
+        """,
+        (period, period),
+    )
 
 
 def init_db() -> None:
@@ -127,6 +147,7 @@ def init_db() -> None:
             WHERE status = 'reserved'
             """
         )
+        reset_due_monthly_quotas(conn)
 
 
 def get_user_by_username(username: str) -> dict[str, Any] | None:
@@ -142,12 +163,13 @@ def get_user_by_id(user_id: int) -> dict[str, Any] | None:
 def ensure_quota(conn: sqlite3.Connection, user_id: int, monthly_quota: int = 500) -> None:
     conn.execute(
         """
-        INSERT INTO user_quotas (user_id, monthly_quota)
-        VALUES (?, ?)
+        INSERT INTO user_quotas (user_id, monthly_quota, reset_at)
+        VALUES (?, ?, ?)
         ON CONFLICT(user_id) DO NOTHING
         """,
-        (user_id, monthly_quota),
+        (user_id, monthly_quota, current_quota_period()),
     )
+    reset_due_monthly_quotas(conn)
 
 
 def quota_for_user(user_id: int) -> dict[str, Any]:
@@ -162,11 +184,13 @@ def quota_for_user(user_id: int) -> dict[str, Any]:
 
 def list_users() -> list[dict[str, Any]]:
     with connect() as conn:
+        reset_due_monthly_quotas(conn)
         rows = conn.execute(
             """
             SELECT users.id, users.username, users.role, users.status, users.display_name,
                    users.created_at, users.last_login_at,
-                   user_quotas.monthly_quota, user_quotas.used_quota, user_quotas.reserved_quota
+                   user_quotas.monthly_quota, user_quotas.used_quota, user_quotas.reserved_quota,
+                   user_quotas.reset_cycle, user_quotas.reset_at
             FROM users
             LEFT JOIN user_quotas ON user_quotas.user_id = users.id
             ORDER BY users.id
@@ -243,10 +267,11 @@ def reset_user_quota(user_id: int) -> None:
             UPDATE user_quotas
             SET used_quota = 0,
                 reserved_quota = 0,
+                reset_at = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE user_id = ?
             """,
-            (user_id,),
+            (current_quota_period(), user_id),
         )
 
 
@@ -281,6 +306,7 @@ def reserve_quota(
     with connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         ensure_quota(conn, user_id)
+        reset_due_monthly_quotas(conn)
         quota = conn.execute("SELECT * FROM user_quotas WHERE user_id = ?", (user_id,)).fetchone()
         assert quota is not None
         available = int(quota["monthly_quota"]) - int(quota["used_quota"]) - int(quota["reserved_quota"])
@@ -559,6 +585,7 @@ def list_projects(user_id: int | None = None) -> list[dict[str, Any]]:
 
 def admin_stats() -> dict[str, Any]:
     with connect() as conn:
+        reset_due_monthly_quotas(conn)
         user_counts = conn.execute(
             """
             SELECT

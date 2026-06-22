@@ -638,6 +638,7 @@ def admin_page(user: dict[str, Any]) -> str:
             f"<tr><td>{item['id']}</td><td>{html.escape(item['username'])}</td><td>{html.escape(item['role'])}</td>"
             f"<td>{html.escape(item['status'])}</td><td>{item.get('monthly_quota') or 0}</td>"
             f"<td>{item.get('used_quota') or 0}</td><td>{item.get('reserved_quota') or 0}</td><td>{available}</td>"
+            f"<td>{html.escape(str(item.get('reset_cycle') or 'monthly'))}</td><td>{html.escape(str(item.get('reset_at') or ''))}</td>"
             f"<td><form method='post' action='/admin/users/{item['id']}/quota' class='inline-form'>"
             f"<input name='monthly_quota' type='number' value='{item.get('monthly_quota') or 0}'><button>改额度</button></form>"
             f"<form method='post' action='/admin/users/{item['id']}/quota/add' class='inline-form'>"
@@ -734,7 +735,7 @@ def admin_page(user: dict[str, Any]) -> str:
   <section>
     <h2>用户与额度</h2>
     <table>
-      <thead><tr><th>ID</th><th>账号</th><th>角色</th><th>状态</th><th>总额</th><th>已用</th><th>预扣</th><th>可用</th><th>操作</th></tr></thead>
+      <thead><tr><th>ID</th><th>账号</th><th>角色</th><th>状态</th><th>总额</th><th>已用</th><th>预扣</th><th>可用</th><th>周期</th><th>当前周期</th><th>操作</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
   </section>
