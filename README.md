@@ -127,6 +127,13 @@ http://127.0.0.1:8000
 docs/DEPLOYABLE_SERVER.md
 ```
 
+可部署版默认限制同一账号最多 2 个排队或运行中的长任务，全站最多 8 个。可以在 `.env` 里调整：
+
+```dotenv
+AI_MANGA_MAX_ACTIVE_JOBS_PER_USER=2
+AI_MANGA_MAX_ACTIVE_JOBS_TOTAL=8
+```
+
 仓库也提供了可复制到 Linux 服务器的部署模板：
 
 ```text

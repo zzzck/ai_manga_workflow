@@ -72,6 +72,32 @@ def quota_units(action: str, stages: str = "") -> int:
     return cost
 
 
+def int_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def job_capacity_limits() -> dict[str, int]:
+    return {
+        "max_active_jobs_per_user": int_env("AI_MANGA_MAX_ACTIVE_JOBS_PER_USER", 2),
+        "max_active_jobs_total": int_env("AI_MANGA_MAX_ACTIVE_JOBS_TOTAL", 8),
+    }
+
+
+def enforce_job_capacity(user: dict[str, Any]) -> None:
+    limits = job_capacity_limits()
+    per_user_limit = limits["max_active_jobs_per_user"]
+    total_limit = limits["max_active_jobs_total"]
+    user_active = db.active_job_count(int(user["id"]))
+    total_active = db.active_job_count()
+    if per_user_limit and user_active >= per_user_limit:
+        raise ValueError(f"当前账号已有 {user_active} 个排队或运行中的任务，上限为 {per_user_limit} 个。请等待任务完成或先终止任务。")
+    if total_limit and total_active >= total_limit:
+        raise ValueError(f"当前服务已有 {total_active} 个排队或运行中的任务，上限为 {total_limit} 个。请稍后再试。")
+
+
 def env_value(name: str, env_values: dict[str, str | None]) -> str:
     return os.getenv(name, "") or str(env_values.get(name) or "")
 
@@ -366,6 +392,7 @@ def cancel_db_job(job_id: str) -> dict[str, Any]:
 
 
 def start_db_job(user: dict[str, Any], payload: dict[str, Any], units: int) -> dict[str, Any]:
+    enforce_job_capacity(user)
     job_id = db.next_job_hint()
     prepared = prepare_user_stage_payload(user, payload, job_id_hint=job_id)
     label, command = legacy_web._build_command(prepared)
@@ -745,6 +772,10 @@ def admin_server_info() -> dict[str, Any]:
             "slot_count": len(provider_status.get("slots", [])),
             "error": provider_status.get("error", ""),
         },
+        "job_capacity": {
+            **job_capacity_limits(),
+            "active_jobs_total": db.active_job_count(),
+        },
         "commands": {
             "serve": "manga-flow serve --host 127.0.0.1 --port 8000",
             "backup": "manga-flow backup-server --output backups",
@@ -757,6 +788,7 @@ def admin_server_info_html() -> str:
     info = admin_server_info()
     provider = info["provider_status"]
     dirs = info["data_dirs"]
+    capacity = info["job_capacity"]
     provider_text = "正常" if provider.get("ok") else "需要检查"
     missing_envs = ", ".join(str(item) for item in provider.get("missing_required_envs") or []) or "-"
     error_text = str(provider.get("error") or "")
@@ -767,6 +799,10 @@ def admin_server_info_html() -> str:
         ("用户数据目录", f"{dirs['user_data']['path']} ({'存在' if dirs['user_data']['exists'] else '不存在'})"),
         ("用户输出目录", f"{dirs['user_outputs']['path']} ({'存在' if dirs['user_outputs']['exists'] else '不存在'})"),
         ("模型配置状态", f"{provider_text}；缺失环境变量：{missing_envs}"),
+        (
+            "任务并发限制",
+            f"单用户 {capacity['max_active_jobs_per_user'] or '不限'}；全站 {capacity['max_active_jobs_total'] or '不限'}；当前全站活跃 {capacity['active_jobs_total']}",
+        ),
         ("健康检查", info["healthz"]),
         ("备份命令", info["commands"]["backup"]),
     ]
@@ -1366,6 +1402,7 @@ async def api_script_workshop(request: Request, user: dict[str, Any] = Depends(a
     event_id = 0
     job_id = db.next_job_hint()
     try:
+        enforce_job_capacity(user)
         provider_name, model_name = usage_model_identity({**payload, "action": "script_workshop"})
         event_id = db.reserve_quota(
             int(user["id"]),

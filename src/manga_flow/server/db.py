@@ -569,6 +569,20 @@ def list_jobs(
         return [dict(row) for row in rows]
 
 
+def active_job_count(user_id: int | None = None) -> int:
+    filters = ["status IN ('queued', 'running')"]
+    values: list[Any] = []
+    if user_id is not None:
+        filters.append("user_id = ?")
+        values.append(user_id)
+    with connect() as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) AS count FROM jobs WHERE {' AND '.join(filters)}",
+            values,
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+
 def get_job(job_id: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(

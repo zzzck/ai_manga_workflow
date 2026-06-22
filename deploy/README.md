@@ -30,7 +30,11 @@ python -m pip install -e .
 AI_MANGA_SECRET_KEY=请换成长随机字符串
 AI_MANGA_ADMIN_PASSWORD=请换成强密码
 AI_MANGA_DB_PATH=/opt/ai_manga_workflow/data/server/ai_manga.sqlite3
+AI_MANGA_MAX_ACTIVE_JOBS_PER_USER=2
+AI_MANGA_MAX_ACTIVE_JOBS_TOTAL=8
 ```
+
+`AI_MANGA_MAX_ACTIVE_JOBS_PER_USER` 和 `AI_MANGA_MAX_ACTIVE_JOBS_TOTAL` 用于限制排队/运行中的长任务数量，防止试用服务器被任务堆满；设为 `0` 表示不限制。
 
 确保运行用户可以写入数据目录：
 

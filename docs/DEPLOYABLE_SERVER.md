@@ -58,6 +58,8 @@ AI_MANGA_ADMIN_USERNAME=admin
 AI_MANGA_ADMIN_PASSWORD=change-this-password
 AI_MANGA_ADMIN_DISPLAY_NAME=系统管理员
 AI_MANGA_ADMIN_MONTHLY_QUOTA=10000
+AI_MANGA_MAX_ACTIVE_JOBS_PER_USER=2
+AI_MANGA_MAX_ACTIVE_JOBS_TOTAL=8
 ```
 
 如果已经启动过并创建了 SQLite 数据库，修改默认管理员环境变量不会重置现有用户。需要重置本地开发库时，停止服务后删除：
@@ -88,6 +90,7 @@ data/server/ai_manga.sqlite3-shm
 - 受保护控制台：`/console` 会显示当前用户和额度，并复用原有 AI 漫剧控制台。
 - 受保护原接口：`/api/state`、`/api/project`、`/api/script/workshop`、`/api/script/import`、`/api/file` 等均要求登录。
 - 额度预扣：AI 生成剧本、规范化导入剧本、分阶段生成会在后端检查额度。
+- 长任务并发限制：普通生成任务和 AI 剧本工坊会在后端限制排队/运行中的任务数，默认单用户 2 个、全站 8 个；可用 `AI_MANGA_MAX_ACTIVE_JOBS_PER_USER` 和 `AI_MANGA_MAX_ACTIVE_JOBS_TOTAL` 调整，设为 `0` 表示不限制。
 - 普通生成任务结算：`/api/jobs` 创建任务时进入 `reserved_quota`，命令真正成功后转入 `used_quota`，命令失败后退回额度并记录失败日志。
 - AI 剧本工坊结算：`/api/script/workshop` 创建任务时进入 `reserved_quota`，后台工坊任务完成后同步到数据库；成功转入 `used_quota`，失败或终止退回额度。
 - 月度额度周期：`reset_cycle=monthly` 的账号会在进入新月份后自动把 `used_quota` 清零，并把 `reset_at` 更新为当前 `YYYY-MM`；运行中任务的 `reserved_quota` 不会被月度重置清掉。
@@ -140,6 +143,15 @@ manga-flow backup-server --output backups
 | 一键完整出片 | 220 |
 
 当前普通生成任务 `/api/jobs` 和 AI 剧本工坊 `/api/script/workshop` 已按“创建时预扣、任务成功后转已用、任务失败或终止后退回”的方式结算。规范化导入是同步接口，仍是在请求完成时直接成功或退款。
+
+为了避免服务器被单个账号或全站任务堆满，后端会在创建普通生成任务和 AI 剧本工坊任务前检查排队/运行中的任务数：
+
+```dotenv
+AI_MANGA_MAX_ACTIVE_JOBS_PER_USER=2
+AI_MANGA_MAX_ACTIVE_JOBS_TOTAL=8
+```
+
+任一值设为 `0` 表示对应维度不限制。超过限制时任务不会创建，也不会预扣额度。
 
 AI 剧本工坊仍复用旧本地控制台里的 `WORKSHOP_JOBS` 执行逻辑，FastAPI 服务会把状态同步到数据库并在终态结算额度。`/api/state` 会把内存中的工坊任务和数据库中的历史工坊任务合并返回；如果成功任务已经保存了项目 YAML，详情接口会从 YAML 重建 `result.data/content`，方便刷新页面或服务重启后继续查看生成结果。运行中的多角色阶段详情仍无法完整恢复；要做到完整恢复，需要继续把工坊执行器本身迁移到数据库/任务队列。
 
