@@ -136,6 +136,58 @@ def provider_status_payload(config_path: str, env_file: str) -> dict[str, Any]:
     }
 
 
+def provider_identity_for_slots(config_path: str, env_file: str, slots: list[str]) -> tuple[str, str]:
+    if not slots:
+        return "", ""
+    try:
+        status_payload = provider_status_payload(config_path, env_file)
+    except Exception:
+        return "", ""
+    by_slot = {str(item.get("slot") or ""): item for item in status_payload.get("slots", [])}
+    providers: list[str] = []
+    models: list[str] = []
+    for slot in slots:
+        item = by_slot.get(slot)
+        if not item or not item.get("enabled"):
+            continue
+        provider_name = str(item.get("provider") or "")
+        model_name = str(item.get("model") or "")
+        if provider_name:
+            providers.append(provider_name)
+        if model_name:
+            models.append(f"{slot}={model_name}")
+    provider_text = ",".join(sorted(dict.fromkeys(providers)))
+    if "," in provider_text:
+        provider_text = f"mixed:{provider_text}"
+    return provider_text, ",".join(models)
+
+
+def usage_model_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    action = str(payload.get("action") or "stage")
+    config_path = str(payload.get("config") or "config/pipeline.siliconflow.yaml")
+    env_file = str(payload.get("env_file") or ".env")
+    if action == "script_import":
+        return provider_identity_for_slots(config_path, env_file, ["llm"])
+    if action == "script_workshop":
+        return provider_identity_for_slots(config_path, env_file, ["llm", "llm_fast"])
+    if action != "stage":
+        return "", ""
+    parts = {item.strip() for item in str(payload.get("stages") or "").replace("，", ",").split(",") if item.strip()}
+    if not parts or "all" in parts:
+        slots = ["llm", "image", "voice", "video"]
+    else:
+        slots = []
+        if "structure" in parts:
+            slots.append("llm")
+        if "images" in parts:
+            slots.append("image")
+        if "voice" in parts:
+            slots.append("voice")
+        if "videos" in parts:
+            slots.append("video")
+    return provider_identity_for_slots(config_path, env_file, slots)
+
+
 def public_job_status(status_value: str) -> str:
     return {
         "success": "done",
@@ -258,7 +310,15 @@ def start_db_job(user: dict[str, Any], payload: dict[str, Any], units: int) -> d
     log_path = log_dir / f"{job_id}.log"
     event_id = 0
     try:
-        event_id = db.reserve_quota(int(user["id"]), units, action_type=str(payload.get("action") or "stage"), job_id=job_id)
+        provider_name, model_name = usage_model_identity(prepared)
+        event_id = db.reserve_quota(
+            int(user["id"]),
+            units,
+            action_type=str(payload.get("action") or "stage"),
+            job_id=job_id,
+            provider=provider_name,
+            model_name=model_name,
+        )
         db.record_job(
             job_id,
             int(user["id"]),
@@ -594,6 +654,13 @@ def admin_page(user: dict[str, Any]) -> str:
     quota_stats = stats.get("quotas", {})
     job_stats = stats.get("jobs", {})
     user_stats = stats.get("users", {})
+    model_usage_rows = []
+    for item in stats.get("usage", {}).get("by_model", [])[:8]:
+        model_usage_rows.append(
+            f"<tr><td>{html.escape(str(item.get('provider') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('model_name') or ''))}</td>"
+            f"<td>{item.get('events') or 0}</td><td>{item.get('estimated_units') or 0}</td><td>{item.get('actual_units') or 0}</td></tr>"
+        )
     job_rows = []
     for item in db.list_jobs(limit=30):
         job_id = html.escape(str(item.get("id") or ""))
@@ -669,6 +736,13 @@ def admin_page(user: dict[str, Any]) -> str:
     <table>
       <thead><tr><th>ID</th><th>账号</th><th>角色</th><th>状态</th><th>总额</th><th>已用</th><th>预扣</th><th>可用</th><th>操作</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>模型用量</h2>
+    <table>
+      <thead><tr><th>Provider</th><th>模型</th><th>事件数</th><th>预估点数</th><th>实际点数</th></tr></thead>
+      <tbody>{''.join(model_usage_rows) or '<tr><td colspan="5">暂无模型用量</td></tr>'}</tbody>
     </table>
   </section>
   <section>
@@ -988,7 +1062,14 @@ async def api_script_import(request: Request, user: dict[str, Any] = Depends(aut
     units = quota_units("script_import")
     event_id = 0
     try:
-        event_id = db.reserve_quota(int(user["id"]), units, "script_import")
+        provider_name, model_name = usage_model_identity({**payload, "action": "script_import"})
+        event_id = db.reserve_quota(
+            int(user["id"]),
+            units,
+            "script_import",
+            provider=provider_name,
+            model_name=model_name,
+        )
         result = legacy_web._import_script(payload)
         legacy_web._write_web_api_log("script_import", payload, result=result)
         db.finish_usage_event(event_id, "success")
@@ -1007,7 +1088,15 @@ async def api_script_workshop(request: Request, user: dict[str, Any] = Depends(a
     event_id = 0
     job_id = db.next_job_hint()
     try:
-        event_id = db.reserve_quota(int(user["id"]), units, "script_workshop", job_id=job_id)
+        provider_name, model_name = usage_model_identity({**payload, "action": "script_workshop"})
+        event_id = db.reserve_quota(
+            int(user["id"]),
+            units,
+            "script_workshop",
+            job_id=job_id,
+            provider=provider_name,
+            model_name=model_name,
+        )
         payload["_projects_dir"] = relative(user_project_dir(user))
         payload["_job_id"] = job_id
         timestamp = legacy_web.time.strftime("%Y%m%d_%H%M%S")

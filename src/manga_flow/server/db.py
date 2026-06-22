@@ -267,7 +267,15 @@ def add_user_quota(user_id: int, amount: int) -> dict[str, Any]:
     return quota_for_user(user_id)
 
 
-def reserve_quota(user_id: int, units: int, action_type: str, job_id: str | None = None) -> int:
+def reserve_quota(
+    user_id: int,
+    units: int,
+    action_type: str,
+    job_id: str | None = None,
+    *,
+    provider: str = "",
+    model_name: str = "",
+) -> int:
     if units <= 0:
         return 0
     with connect() as conn:
@@ -289,10 +297,10 @@ def reserve_quota(user_id: int, units: int, action_type: str, job_id: str | None
         )
         cursor = conn.execute(
             """
-            INSERT INTO usage_events (user_id, job_id, action_type, estimated_units, status)
-            VALUES (?, ?, ?, ?, 'reserved')
+            INSERT INTO usage_events (user_id, job_id, provider, model_name, action_type, estimated_units, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'reserved')
             """,
-            (user_id, job_id or "", action_type, units),
+            (user_id, job_id or "", provider, model_name, action_type, units),
         )
         event_id = int(cursor.lastrowid)
         conn.execute("COMMIT")
@@ -593,6 +601,20 @@ def admin_stats() -> dict[str, Any]:
             ORDER BY status
             """
         ).fetchall()
+        usage_by_model = conn.execute(
+            """
+            SELECT
+                COALESCE(NULLIF(provider, ''), 'unknown') AS provider,
+                COALESCE(NULLIF(model_name, ''), 'unknown') AS model_name,
+                COUNT(*) AS events,
+                COALESCE(SUM(estimated_units), 0) AS estimated_units,
+                COALESCE(SUM(actual_units), 0) AS actual_units
+            FROM usage_events
+            GROUP BY COALESCE(NULLIF(provider, ''), 'unknown'), COALESCE(NULLIF(model_name, ''), 'unknown')
+            ORDER BY actual_units DESC, estimated_units DESC, events DESC
+            LIMIT 20
+            """
+        ).fetchall()
         today_usage = conn.execute(
             """
             SELECT
@@ -635,6 +657,7 @@ def admin_stats() -> dict[str, Any]:
         },
         "usage": {
             "by_status": [dict(row) for row in usage_by_status],
+            "by_model": [dict(row) for row in usage_by_model],
             "today": dict(today_usage or {}),
             "top_users": [dict(row) for row in top_users],
         },
