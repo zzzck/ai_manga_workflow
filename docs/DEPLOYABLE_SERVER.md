@@ -171,9 +171,11 @@ manga-flow restore-server-backup backups/ai_manga_backup_YYYYMMDD_HHMMSS.zip --a
 | 脚本分镜 | 5 |
 | 生成图片 | 80 |
 | 生成配音 | 30 |
-| 生成视频 | 120 |
+| 生成视频 | 按视频数量：1 个 50，每多 1 个加 30；0 个为 0 |
 | 合成成片 | 5 |
-| 一键完整出片 | 220 |
+| 一键完整出片 | 脚本分镜 + 图片 + 配音 + 视频数量公式 + 合成 |
+
+视频数量的判断规则：`key_shots` 为空时不生成视频，视频部分扣 0；`key_shots` 是逗号分隔镜头 ID 时按 ID 数量计算；`key_shots=auto` 时读取项目 YAML 中 `production_mode_first/second: image_to_video` 的镜头数。
 
 当前普通生成任务 `/api/jobs` 和 AI 剧本工坊 `/api/script/workshop` 已按“创建时预扣、任务成功后转已用、任务失败或终止后退回”的方式结算。规范化导入是同步接口，仍是在请求完成时直接成功或退款。
 

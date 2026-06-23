@@ -46,7 +46,46 @@ def json_error(message: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status_code)
 
 
-def quota_units(action: str, stages: str = "") -> int:
+def video_quota_units(video_count: int) -> int:
+    if video_count <= 0:
+        return 0
+    return 50 + max(0, video_count - 1) * 30
+
+
+def requested_video_count(payload: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> int:
+    payload = payload or {}
+    key_shots = str(payload.get("key_shots", "auto")).strip()
+    if key_shots == "":
+        return 0
+    if key_shots.lower() != "auto":
+        return len([item for item in key_shots.replace("，", ",").split(",") if item.strip()])
+    project_value = str(payload.get("project") or "").strip()
+    if not project_value:
+        return 1
+    try:
+        safe_path = user_safe_project_path(user, project_value, for_write=False) if user else project_value
+        project_path = (ROOT / safe_path).resolve()
+        if project_path == ROOT or ROOT not in project_path.parents or not project_path.is_file():
+            return 1
+        data = yaml.safe_load(project_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return 1
+    count = 0
+    for beat in data.get("beats") or []:
+        if not isinstance(beat, dict):
+            continue
+        for key in ["production_mode_first", "production_mode_second"]:
+            if str(beat.get(key) or "").strip() == "image_to_video":
+                count += 1
+    return count
+
+
+def quota_units(
+    action: str,
+    stages: str = "",
+    payload: dict[str, Any] | None = None,
+    user: dict[str, Any] | None = None,
+) -> int:
     if action == "script_workshop":
         return 20
     if action == "script_import":
@@ -57,7 +96,7 @@ def quota_units(action: str, stages: str = "") -> int:
         return 0
     parts = {item.strip() for item in stages.replace("，", ",").split(",") if item.strip()}
     if not parts or "all" in parts:
-        return 220
+        parts = {"structure", "images", "voice", "videos", "compose"}
     cost = 0
     if "structure" in parts:
         cost += 5
@@ -66,7 +105,7 @@ def quota_units(action: str, stages: str = "") -> int:
     if "voice" in parts:
         cost += 30
     if "videos" in parts:
-        cost += 120
+        cost += video_quota_units(requested_video_count(payload, user))
     if "compose" in parts:
         cost += 5
     return cost
@@ -892,17 +931,63 @@ def console_page(user: dict[str, Any]) -> str:
     banner = f"""
   <div class="deploy-banner">
     <span>当前用户：{html.escape(user["username"])}（{html.escape(user["role"])})</span>
-    <span>额度：可用 {quota["available_quota"]} / 总额 {quota["monthly_quota"]}，已用 {quota["used_quota"]}，预扣 {quota["reserved_quota"]}</span>
+    <span id="deployQuota">额度：可用 {quota["available_quota"]} / 总额 {quota["monthly_quota"]}，已用 {quota["used_quota"]}，预扣 {quota["reserved_quota"]}</span>
     {admin_link}
     <a href="/api/quota/me" target="_blank">额度详情</a>
-    <form method="post" action="/logout"><button type="submit">退出</button></form>
+    <form method="post" action="/logout"><button class="logout-button" type="submit">退出</button></form>
   </div>
   <style>
     .deploy-banner {{ display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:10px 24px; background:#0f172a; color:#e5e7eb; font-size:13px; }}
     .deploy-banner a {{ color:#bfdbfe; text-decoration:none; }}
     .deploy-banner form {{ margin:0; }}
     .deploy-banner button {{ min-height:28px; border:1px solid #475569; border-radius:6px; background:#1e293b; color:#e5e7eb; cursor:pointer; padding:0 10px; }}
+    .deploy-banner .logout-button {{ border-color:#ef4444; background:#dc2626; color:#fff; font-weight:700; }}
+    .deploy-banner .logout-button:hover {{ background:#b91c1c; }}
   </style>
+  <script>
+    (function () {{
+      var quotaEl = document.getElementById('deployQuota');
+      var quotaTimer = null;
+      var quotaHookInstalled = false;
+      async function refreshQuota() {{
+        if (!quotaEl) return;
+        try {{
+          var response = await fetch('/api/quota/me', {{ cache: 'no-store' }});
+          if (!response.ok) return;
+          var quota = await response.json();
+          quotaEl.textContent = '额度：可用 ' + quota.available_quota + ' / 总额 ' + quota.monthly_quota + '，已用 ' + quota.used_quota + '，预扣 ' + quota.reserved_quota;
+        }} catch (error) {{}}
+      }}
+      function installShowPageHook() {{
+        if (quotaHookInstalled || typeof window.showPage !== 'function') return;
+        var originalShowPage = window.showPage;
+        window.showPage = function () {{
+          var result = originalShowPage.apply(this, arguments);
+          window.setTimeout(refreshQuota, 200);
+          return result;
+        }};
+        quotaHookInstalled = true;
+      }}
+      window.refreshDeployQuota = refreshQuota;
+      document.addEventListener('visibilitychange', function () {{
+        if (!document.hidden) refreshQuota();
+      }});
+      document.addEventListener('click', function (event) {{
+        if (event.target && event.target.closest && event.target.closest('button, select, .entry-card, [data-page]')) {{
+          window.setTimeout(refreshQuota, 300);
+        }}
+      }}, true);
+      document.addEventListener('DOMContentLoaded', function () {{
+        refreshQuota();
+        installShowPageHook();
+        quotaTimer = window.setInterval(refreshQuota, 5000);
+        window.setInterval(installShowPageHook, 1000);
+      }});
+      window.addEventListener('beforeunload', function () {{
+        if (quotaTimer) window.clearInterval(quotaTimer);
+      }});
+    }})();
+  </script>
 """
     return legacy_web.INDEX_HTML.replace("<body>", f"<body>{banner}", 1)
 
@@ -1647,7 +1732,7 @@ async def api_jobs_start(request: Request, user: dict[str, Any] = Depends(auth.c
     payload = await request.json()
     action = str(payload.get("action") or "stage")
     stages = str(payload.get("stages") or "")
-    units = quota_units(action, stages)
+    units = quota_units(action, stages, payload=payload, user=user)
     try:
         return start_db_job(user, payload, units)
     except Exception as exc:

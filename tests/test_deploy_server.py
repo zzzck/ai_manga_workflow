@@ -159,6 +159,41 @@ def test_job_capacity_rejects_without_quota_reservation(tmp_path: Path, monkeypa
         assert after["reserved_quota"] == before["reserved_quota"]
 
 
+def test_video_quota_uses_requested_video_count(tmp_path: Path, monkeypatch) -> None:
+    app_mod, _ = load_server(tmp_path, monkeypatch)
+    project_path = tmp_path / "data" / "projects" / "video_count.yaml"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text(
+        """
+title: video count
+beats:
+  - id: b1
+    production_mode_first: image_to_video
+    production_mode_second: image_to_video
+  - id: b2
+    production_mode_first: manual_review
+    production_mode_second: image_to_video
+""",
+        encoding="utf-8",
+    )
+
+    assert app_mod.video_quota_units(0) == 0
+    assert app_mod.video_quota_units(1) == 50
+    assert app_mod.video_quota_units(3) == 110
+    assert app_mod.quota_units("stage", "videos", payload={"key_shots": ""}) == 0
+    assert app_mod.quota_units("stage", "videos", payload={"key_shots": "s1,s2,s3"}) == 110
+    assert app_mod.quota_units(
+        "stage",
+        "videos",
+        payload={"key_shots": "auto", "project": "data/projects/video_count.yaml"},
+    ) == 110
+    assert app_mod.quota_units(
+        "stage",
+        "all",
+        payload={"key_shots": "auto", "project": "data/projects/video_count.yaml"},
+    ) == 230
+
+
 def test_admin_server_info_does_not_leak_api_keys(tmp_path: Path, monkeypatch) -> None:
     app_mod, _ = load_server(tmp_path, monkeypatch)
 
@@ -177,6 +212,20 @@ def test_admin_server_info_does_not_leak_api_keys(tmp_path: Path, monkeypatch) -
         assert admin_page.status_code == 200
         assert "运行状态" in admin_page.text
         assert "sk-test-should-not-leak" not in admin_page.text
+
+
+def test_console_banner_refreshes_quota_and_highlights_logout(tmp_path: Path, monkeypatch) -> None:
+    app_mod, _ = load_server(tmp_path, monkeypatch)
+
+    with TestClient(app_mod.app) as client:
+        login_admin(client)
+        response = client.get("/console")
+        assert response.status_code == 200, response.text
+        assert 'id="deployQuota"' in response.text
+        assert "setInterval(refreshQuota, 5000)" in response.text
+        assert "window.refreshDeployQuota = refreshQuota" in response.text
+        assert "logout-button" in response.text
+        assert "background:#dc2626" in response.text
 
 
 def test_admin_quota_api_lists_and_updates_user_quotas(tmp_path: Path, monkeypatch) -> None:
